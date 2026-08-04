@@ -2,9 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 
 import { useContentProviderStore } from '@/src/state/contentProviderStore';
+import { useDownloadSettingsStore } from '@/src/state/downloadSettingsStore';
+import { useNewsFeedStore } from '@/src/state/newsFeedStore';
 import { useAppTheme } from '@/src/theme';
 
 function TabIcon({
@@ -25,10 +27,23 @@ function TabIcon({
 export default function TabLayout() {
   const { colors } = useAppTheme();
   const { session, hydrate } = useContentProviderStore();
+  const hydrateDownloadSettings = useDownloadSettingsStore((state) => state.hydrate);
+  const { hydrate: hydrateNewsFeed, checkForUnread, hasUnread } = useNewsFeedStore();
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    void hydrateDownloadSettings();
+  }, [hydrateDownloadSettings]);
+
+  useEffect(() => {
+    void (async () => {
+      await hydrateNewsFeed();
+      void checkForUnread();
+    })();
+  }, [hydrateNewsFeed, checkForUnread]);
 
   return (
     <Tabs
@@ -66,6 +81,8 @@ export default function TabLayout() {
         name="news"
         options={{
           title: 'Notícias',
+          tabBarBadge: hasUnread ? '' : undefined,
+          tabBarBadgeStyle: styles.newsBadge,
           tabBarIcon: ({ color }) => (
             <TabIcon ios="newspaper" fallback="newspaper-outline" color={color} />
           ),
@@ -83,4 +100,13 @@ export default function TabLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  newsBadge: {
+    minWidth: 9,
+    height: 9,
+    borderRadius: 5,
+    marginTop: 2,
+  },
+});
 

@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { PagedReader } from '@/src/components/reader/PagedReader';
@@ -39,10 +41,12 @@ interface ProviderReaderScreenContentProps {
 function ProviderReaderScreenContent({ chapterId, slug, title }: ProviderReaderScreenContentProps) {
   const router = useRouter();
   const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const { session } = useContentProviderStore();
   const { loading, error, pages } = useProviderChapterPages(session, slug, chapterId);
   const pageUris = pages.map((page) => page.imageUrl);
-  const { mode, direction, brightnessOverlay, keepAwake, setMode, setDirection, hydrate } = useReaderSettingsStore();
+  const { mode, direction, brightnessOverlay, keepAwake, orientationLock, setMode, setDirection, hydrate } =
+    useReaderSettingsStore();
   const [overlayVisible, setOverlayVisible] = useState(true);
   const [currentPage, setCurrentPage] = useState(0);
   const [saved, setSaved] = useState(false);
@@ -118,6 +122,19 @@ function ProviderReaderScreenContent({ chapterId, slug, title }: ProviderReaderS
     };
   }, [keepAwake]);
 
+  useEffect(() => {
+    const lock =
+      orientationLock === 'landscape'
+        ? ScreenOrientation.OrientationLock.LANDSCAPE
+        : orientationLock === 'auto'
+          ? ScreenOrientation.OrientationLock.ALL
+          : ScreenOrientation.OrientationLock.PORTRAIT_UP;
+    void ScreenOrientation.lockAsync(lock);
+    return () => {
+      void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    };
+  }, [orientationLock]);
+
   if (loading) {
     return (
       <View style={[styles.center, { backgroundColor: '#000' }]}>
@@ -177,14 +194,13 @@ function ProviderReaderScreenContent({ chapterId, slug, title }: ProviderReaderS
             direction={direction}
             onChangeMode={setMode}
             onChangeDirection={setDirection}
-            overlayColor={colors.overlay}
           />
         </View>
       ) : null}
 
       {mode === 'vertical' && overlayVisible && currentPage < pageUris.length - 1 ? (
         <Pressable
-          style={[styles.scrollToTopButton, { backgroundColor: colors.overlay }]}
+          style={[styles.scrollToTopButton, { backgroundColor: colors.overlay, bottom: 32 + insets.bottom }]}
           onPress={() => verticalReaderRef.current?.scrollToTop()}>
           <Ionicons name="arrow-up" size={20} color="#fff" />
         </Pressable>

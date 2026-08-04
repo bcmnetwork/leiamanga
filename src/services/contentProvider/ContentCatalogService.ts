@@ -170,7 +170,7 @@ export async function searchWorks(session: ContentProviderSession, query: string
 /** Browses the provider's full catalog (dedicated "discover" area), paginated. */
 export async function getCatalog(
   session: ContentProviderSession,
-  options: { q?: string; page?: number; limit?: number; genre?: string; type?: string } = {},
+  options: { q?: string; page?: number; limit?: number; genre?: string; type?: string; sort?: string } = {},
 ): Promise<ProviderCatalogPage> {
   const { data, meta } = await authorizedGetWithMeta<ProviderWorkSummary[]>(session, '/catalog', {
     q: options.q,
@@ -178,6 +178,7 @@ export async function getCatalog(
     limit: options.limit ?? 24,
     genre: options.genre,
     type: options.type,
+    sort: options.sort,
   });
   return {
     items: data,

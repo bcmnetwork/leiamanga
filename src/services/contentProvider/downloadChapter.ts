@@ -45,6 +45,7 @@ export async function downloadChapterForOffline(
   session: ContentProviderSession,
   work: ProviderWorkDetail,
   chapter: ProviderChapterSummary,
+  onProgress?: (done: number, total: number) => void,
 ): Promise<void> {
   const sourceUri = buildSourceUri(session, work.slug, chapter.id);
   const alreadyDownloaded = await getChapterBySourceUri(sourceUri);
@@ -78,12 +79,15 @@ export async function downloadChapterForOffline(
 
   const pageFiles: string[] = [];
   try {
-    for (const page of pages.slice().sort((a, b) => a.index - b.index)) {
+    const sortedPages = pages.slice().sort((a, b) => a.index - b.index);
+    onProgress?.(0, sortedPages.length);
+    for (const page of sortedPages) {
       const ext = guessExtension(page.imageUrl);
       const pageFileName = `page-${String(page.index + 1).padStart(4, '0')}.${ext}`;
       const target = new File(destDir, pageFileName);
       await File.downloadFileAsync(page.imageUrl, target, { idempotent: true });
       pageFiles.push(pageFileName);
+      onProgress?.(pageFiles.length, sortedPages.length);
     }
   } catch {
     destDir.delete();

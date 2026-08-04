@@ -14,6 +14,25 @@ export interface ImportSummary {
   failed: number;
 }
 
+/** Extracts and registers a single CBZ file already sitting at `uri` (e.g. from the document picker or a received upload). */
+export async function importCbzFromUri(uri: string, fileName: string): Promise<void> {
+  const chapterId = generateId();
+  const seriesTitle = guessSeriesTitle(fileName);
+  const seriesId = await createSeriesIfNeeded(seriesTitle);
+  const destDir = new Directory(Paths.document, 'chapters', chapterId);
+  const extracted = await extractCbzToDirectory(uri, destDir);
+
+  await createChapter({
+    id: chapterId,
+    seriesId,
+    title: seriesTitle,
+    sourceUri: uri,
+    pagesDir: extracted.pagesDir,
+    pageFiles: extracted.pageFiles,
+    coverFile: extracted.coverFile,
+  });
+}
+
 export async function pickAndImportCbzFiles(): Promise<ImportSummary> {
   const result = await DocumentPicker.getDocumentAsync({
     multiple: true,
@@ -30,21 +49,7 @@ export async function pickAndImportCbzFiles(): Promise<ImportSummary> {
 
   for (const asset of result.assets) {
     try {
-      const chapterId = generateId();
-      const seriesTitle = guessSeriesTitle(asset.name);
-      const seriesId = await createSeriesIfNeeded(seriesTitle);
-      const destDir = new Directory(Paths.document, 'chapters', chapterId);
-      const extracted = await extractCbzToDirectory(asset.uri, destDir);
-
-      await createChapter({
-        id: chapterId,
-        seriesId,
-        title: seriesTitle,
-        sourceUri: asset.uri,
-        pagesDir: extracted.pagesDir,
-        pageFiles: extracted.pageFiles,
-        coverFile: extracted.coverFile,
-      });
+      await importCbzFromUri(asset.uri, asset.name);
       imported += 1;
     } catch (error) {
       console.warn('Falha ao importar CBZ', asset.name, error);

@@ -2,16 +2,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Keyboard,
-    Pressable,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Keyboard,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 import { pickAndImportCbzFiles } from '@/src/cbz/importCbz';
@@ -20,15 +20,18 @@ import { ScreenContainer } from '@/src/components/common/ScreenContainer';
 import { SeriesGridItem } from '@/src/components/library/SeriesGridItem';
 import { deleteDownloadedSeries } from '@/src/db/libraryMaintenance';
 import { toggleFavorite } from '@/src/db/repository';
+import { useContentProviderStore } from '@/src/state/contentProviderStore';
 import { useLibraryStore } from '@/src/state/libraryStore';
 import { useAppTheme } from '@/src/theme';
 
 export default function LibraryScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
+  const { session } = useContentProviderStore();
   const { series, loading, query, favoritesOnly, sortBy, setQuery, setFavoritesOnly, setSortBy, refresh } =
     useLibraryStore();
   const [importing, setImporting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     void refresh();
@@ -41,6 +44,15 @@ export default function LibraryScreen() {
       void refresh();
     }, [refresh])
   );
+
+  async function handlePullToRefresh() {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function handleImport() {
     setImporting(true);
@@ -86,17 +98,31 @@ export default function LibraryScreen() {
   return (
     <ScreenContainer>
       <View style={styles.header}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Biblioteca</Text>
-        <Pressable
-          style={[styles.importButton, { backgroundColor: colors.accent }]}
-          onPress={handleImport}
-          disabled={importing}>
-          {importing ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Ionicons name="add" size={22} color="#fff" />
-          )}
-        </Pressable>
+        <Text
+          style={[styles.headerTitle, { color: colors.text }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit>
+          Biblioteca
+        </Text>
+        <View style={styles.headerActions}>
+          {session ? (
+            <Pressable
+              style={[styles.iconButton, { borderColor: colors.border }]}
+              onPress={() => router.push('/downloads')}>
+              <Ionicons name="download-outline" size={20} color={colors.text} />
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={[styles.importButton, { backgroundColor: colors.accent }]}
+            onPress={handleImport}
+            disabled={importing}>
+            {importing ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Ionicons name="add" size={22} color="#fff" />
+            )}
+          </Pressable>
+        </View>
       </View>
 
       <View style={[styles.searchBar, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
@@ -164,7 +190,7 @@ export default function LibraryScreen() {
           numColumns={2}
           columnWrapperStyle={styles.column}
           contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} tintColor={colors.accent} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handlePullToRefresh} tintColor={colors.accent} />}
           renderItem={({ item }) => (
             <SeriesGridItem
               series={item}
@@ -189,8 +215,23 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   headerTitle: {
+    flex: 1,
     fontSize: 26,
     fontWeight: '700',
+    marginRight: 12,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   importButton: {
     width: 40,

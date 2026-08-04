@@ -1,89 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Directory, Paths } from 'expo-file-system';
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { ScreenContainer } from '@/src/components/common/ScreenContainer';
-import { deleteAllDownloads } from '@/src/db/libraryMaintenance';
 import { useContentProviderStore } from '@/src/state/contentProviderStore';
-import {
-    ReadingDirection,
-    ReadingMode,
-    useReaderSettingsStore,
-} from '@/src/state/readerSettingsStore';
 import { useAppTheme } from '@/src/theme';
-
-const MODE_OPTIONS: { key: ReadingMode; label: string }[] = [
-  { key: 'single', label: 'Página única' },
-  { key: 'vertical', label: 'Vertical (webtoon)' },
-];
-
-const DIRECTION_OPTIONS: { key: ReadingDirection; label: string }[] = [
-  { key: 'ltr', label: 'Esquerda → Direita' },
-  { key: 'rtl', label: 'Direita → Esquerda' },
-];
-
-function getStorageUsageBytes(): number {
-  const chaptersSize = new Directory(Paths.document, 'chapters').size ?? 0;
-  const seriesSize = new Directory(Paths.document, 'series').size ?? 0;
-  return chaptersSize + seriesSize;
-}
-
-function formatMB(bytes: number): string {
-  return (bytes / (1024 * 1024)).toFixed(1);
-}
 
 export default function SettingsScreen() {
   const { colors } = useAppTheme();
   const router = useRouter();
   const { session, disconnecting, disconnect } = useContentProviderStore();
-  const {
-    mode,
-    direction,
-    keepAwake,
-    hydrate,
-    setMode,
-    setDirection,
-    setKeepAwake,
-  } = useReaderSettingsStore();
-  const [storageBytes, setStorageBytes] = useState(0);
-  const [clearing, setClearing] = useState(false);
-
-  useEffect(() => {
-    void hydrate();
-  }, [hydrate]);
-
-  useFocusEffect(
-    useCallback(() => {
-      setStorageBytes(getStorageUsageBytes());
-    }, [])
-  );
-
-  function handleClearDownloads() {
-    Alert.alert(
-      'Apagar todos os downloads?',
-      'Todos os capítulos baixados (importados e obtidos de sites conectados) serão removidos do dispositivo. Isso não afeta sua conta no site.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Apagar tudo',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              setClearing(true);
-              try {
-                await deleteAllDownloads();
-                setStorageBytes(getStorageUsageBytes());
-              } finally {
-                setClearing(false);
-              }
-            })();
-          },
-        },
-      ]
-    );
-  }
 
   function handleDisconnect() {
     Alert.alert('Desconectar site?', 'Você precisará entrar novamente para ler ou baixar capítulos deste site.', [
@@ -99,66 +26,41 @@ export default function SettingsScreen() {
           <Text style={[styles.headerTitle, { color: colors.text }]}>Ajustes</Text>
         </View>
 
-        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Leitura</Text>
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Preferências</Text>
         <View style={[styles.card, { borderColor: colors.border }]}>
-          {MODE_OPTIONS.map((option, index) => (
-            <Pressable
-              key={option.key}
-              style={[
-                styles.cardRow,
-                index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-              ]}
-              onPress={() => setMode(option.key)}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>{option.label}</Text>
-              {mode === option.key ? (
-                <Ionicons name="checkmark-circle" size={20} color={colors.accent} />
-              ) : (
-                <Ionicons name="ellipse-outline" size={20} color={colors.border} />
-              )}
-            </Pressable>
-          ))}
-        </View>
-        <View style={[styles.card, { borderColor: colors.border }]}>
-          {DIRECTION_OPTIONS.map((option, index) => (
-            <Pressable
-              key={option.key}
-              style={[
-                styles.cardRow,
-                index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-              ]}
-              onPress={() => setDirection(option.key)}>
-              <Text style={[styles.optionLabel, { color: colors.text }]}>{option.label}</Text>
-              {direction === option.key ? (
-                <Ionicons name="checkmark-circle" size={20} color={colors.accent} />
-              ) : (
-                <Ionicons name="ellipse-outline" size={20} color={colors.border} />
-              )}
-            </Pressable>
-          ))}
-        </View>
-        <View style={[styles.card, { borderColor: colors.border }]}>
-          <View style={styles.cardRow}>
-            <Text style={[styles.optionLabel, { color: colors.text }]}>Manter tela ligada ao ler</Text>
-            <Switch value={keepAwake} onValueChange={setKeepAwake} />
-          </View>
-        </View>
-
-        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>Armazenamento</Text>
-        <View style={[styles.card, { borderColor: colors.border }]}>
-          <View style={styles.cardRow}>
-            <Text style={[styles.optionLabel, { color: colors.text }]}>Espaço usado por capítulos baixados</Text>
-            <Text style={[styles.optionValue, { color: colors.textMuted }]}>{formatMB(storageBytes)} MB</Text>
-          </View>
+          <Pressable style={styles.cardRow} onPress={() => router.push('/settings/reading')}>
+            <View style={styles.rowIconGroup}>
+              <Ionicons name="book-outline" size={20} color={colors.text} />
+              <Text style={[styles.optionLabel, { color: colors.text }]}>Leitura</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </Pressable>
           <Pressable
             style={[styles.cardRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
-            disabled={clearing}
-            onPress={handleClearDownloads}>
-            <Text style={[styles.optionLabel, { color: colors.danger }]}>Apagar todos os downloads</Text>
-            {clearing ? (
-              <ActivityIndicator size="small" color={colors.danger} />
-            ) : (
-              <Ionicons name="trash-outline" size={18} color={colors.danger} />
-            )}
+            onPress={() => router.push('/settings/storage')}>
+            <View style={styles.rowIconGroup}>
+              <Ionicons name="server-outline" size={20} color={colors.text} />
+              <Text style={[styles.optionLabel, { color: colors.text }]}>Armazenamento</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </Pressable>
+          <Pressable
+            style={[styles.cardRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+            onPress={() => router.push('/settings/appearance')}>
+            <View style={styles.rowIconGroup}>
+              <Ionicons name="color-palette-outline" size={20} color={colors.text} />
+              <Text style={[styles.optionLabel, { color: colors.text }]}>Aparência</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </Pressable>
+          <Pressable
+            style={[styles.cardRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+            onPress={() => router.push('/settings/trackers')}>
+            <View style={styles.rowIconGroup}>
+              <Ionicons name="list-outline" size={20} color={colors.text} />
+              <Text style={[styles.optionLabel, { color: colors.text }]}>Rastreadores</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </Pressable>
         </View>
 
@@ -196,12 +98,17 @@ export default function SettingsScreen() {
           <View style={styles.bannerTextGroup}>
             <Text style={[styles.bannerTitle, { color: colors.text }]}>App LeiaManga</Text>
             <Text style={[styles.bannerSubtitle, { color: colors.textMuted }]}>
-              Seu leitor pessoal de mangás — biblioteca local e sites conectados em um só lugar.
+              Seu leitor pessoal de mangás — sua biblioteca sempre com você.
             </Text>
           </View>
         </View>
 
-        <Text style={[styles.footer, { color: colors.textMuted }]}>Leia Manga · versão 0.1.0</Text>
+        <Pressable
+          style={styles.siteLink}
+          onPress={() => void WebBrowser.openBrowserAsync('https://leiamanga.com')}>
+          <Text style={[styles.footer, { color: colors.textMuted }]}>Leia Manga · versão 0.1.0</Text>
+          <Text style={[styles.siteLinkText, { color: colors.accent }]}>leiamanga.com</Text>
+        </Pressable>
       </ScrollView>
     </ScreenContainer>
   );
@@ -243,13 +150,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
+  rowIconGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   optionLabel: {
     fontSize: 14,
     fontWeight: '500',
-  },
-  optionValue: {
-    fontSize: 13,
-    fontWeight: '600',
   },
   optionTextGroup: {
     flex: 1,
@@ -289,6 +197,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 12,
     marginTop: 32,
+  },
+  siteLink: {
+    alignItems: 'center',
     marginBottom: 16,
+  },
+  siteLinkText: {
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
   },
 });

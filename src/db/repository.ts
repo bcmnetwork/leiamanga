@@ -133,6 +133,39 @@ export async function toggleFavorite(seriesId: string): Promise<void> {
   await db.runAsync('UPDATE series SET favorite = 1 - favorite WHERE id = ?', seriesId);
 }
 
+export interface SeriesMetadataInput {
+  title?: string;
+  description?: string | null;
+  genre?: string | null;
+  coverPath?: string | null;
+}
+
+export async function updateSeriesMetadata(seriesId: string, input: SeriesMetadataInput): Promise<void> {
+  const db = await getDb();
+  const sets: string[] = [];
+  const params: (string | null)[] = [];
+
+  if (input.title !== undefined) {
+    sets.push('title = ?');
+    params.push(input.title);
+  }
+  if (input.description !== undefined) {
+    sets.push('description = ?');
+    params.push(input.description);
+  }
+  if (input.genre !== undefined) {
+    sets.push('genre = ?');
+    params.push(input.genre);
+  }
+  if (input.coverPath !== undefined) {
+    sets.push('cover_path = ?');
+    params.push(input.coverPath);
+  }
+  if (sets.length === 0) return;
+
+  await db.runAsync(`UPDATE series SET ${sets.join(', ')} WHERE id = ?`, ...params, seriesId);
+}
+
 export async function listChaptersForSeries(seriesId: string): Promise<ChapterWithProgress[]> {
   const db = await getDb();
   return db.getAllAsync<ChapterWithProgress>(

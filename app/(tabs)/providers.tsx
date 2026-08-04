@@ -6,6 +6,9 @@ import {
     ActivityIndicator,
     FlatList,
     Keyboard,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -29,7 +32,15 @@ import { useContentProviderStore } from '@/src/state/contentProviderStore';
 import { useAppTheme } from '@/src/theme';
 
 type BrowseView = 'catalog' | 'library';
-type WorkListItem = { slug: string; title: string; coverUrl: string | null; type?: string };
+type SortOption = 'relevance' | 'title_asc' | 'title_desc' | 'chapters_desc';
+type WorkListItem = { slug: string; title: string; coverUrl: string | null; type?: string; chapterCount?: number };
+
+const SORT_OPTIONS: { key: SortOption; label: string; apiSort?: string }[] = [
+  { key: 'relevance', label: 'Padrão' },
+  { key: 'title_asc', label: 'A-Z', apiSort: 'title' },
+  { key: 'title_desc', label: 'Z-A', apiSort: '-title' },
+  { key: 'chapters_desc', label: 'Mais capítulos', apiSort: '-chapters' },
+];
 
 // Local display names for the most common genre slugs returned by the API
 // (which are accent/case-stripped, e.g. "acao"). Anything not listed here
@@ -66,9 +77,11 @@ export default function ProvidersScreen() {
   const [domain, setDomain] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const [view, setView] = useState<BrowseView>('catalog');
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
 
   const [catalog, setCatalog] = useState<ProviderWorkSummary[]>([]);
   const [catalogPage, setCatalogPage] = useState(1);
@@ -83,6 +96,8 @@ export default function ProvidersScreen() {
   const [categories, setCategories] = useState<ProviderCategory[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
+  const [sortBy, setSortBy] = useState<SortOption>('relevance');
+
   const [library, setLibrary] = useState<{ workSlug: string; workTitle: string }[]>([]);
   const [loadingLibrary, setLoadingLibrary] = useState(false);
 
@@ -91,7 +106,7 @@ export default function ProvidersScreen() {
   }, [hydrate]);
 
   const loadCatalog = useCallback(
-    async (page: number, query: string, genre: string | null, category: string | null) => {
+    async (page: number, query: string, genre: string | null, category: string | null, sort: SortOption) => {
       if (!session) return;
       if (page === 1) {
         setLoadingCatalog(true);
@@ -106,6 +121,7 @@ export default function ProvidersScreen() {
           limit: 24,
           genre: genre ?? undefined,
           type: category ?? undefined,
+          sort: SORT_OPTIONS.find((o) => o.key === sort)?.apiSort,
         });
         setCatalog((prev) => (page === 1 ? result.items : [...prev, ...result.items]));
         setCatalogPage(result.page);
@@ -124,7 +140,7 @@ export default function ProvidersScreen() {
   );
 
   useEffect(() => {
-    if (session) void loadCatalog(1, '', null, null);
+    if (session) void loadCatalog(1, '', null, null, 'relevance');
     // Only run when the session first becomes available — subsequent loads are user-triggered.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.token]);
@@ -179,31 +195,36 @@ export default function ProvidersScreen() {
 
   function handleSearchSubmit() {
     Keyboard.dismiss();
-    void loadCatalog(1, searchQuery.trim(), selectedGenre, selectedCategory);
+    void loadCatalog(1, searchQuery.trim(), selectedGenre, selectedCategory, sortBy);
   }
 
   function handleSearchChange(value: string) {
     setSearchQuery(value);
     if (!value.trim()) {
-      void loadCatalog(1, '', selectedGenre, selectedCategory);
+      void loadCatalog(1, '', selectedGenre, selectedCategory, sortBy);
     }
   }
 
   function handleSelectGenre(genre: string) {
     const next = selectedGenre === genre ? null : genre;
     setSelectedGenre(next);
-    void loadCatalog(1, searchQuery.trim(), next, selectedCategory);
+    void loadCatalog(1, searchQuery.trim(), next, selectedCategory, sortBy);
   }
 
   function handleSelectCategory(category: string) {
     const next = selectedCategory === category ? null : category;
     setSelectedCategory(next);
-    void loadCatalog(1, searchQuery.trim(), selectedGenre, next);
+    void loadCatalog(1, searchQuery.trim(), selectedGenre, next, sortBy);
+  }
+
+  function handleSelectSort(sort: SortOption) {
+    setSortBy(sort);
+    void loadCatalog(1, searchQuery.trim(), selectedGenre, selectedCategory, sort);
   }
 
   function handleLoadMore() {
     if (loadingCatalog || loadingMore || catalogPage >= catalogTotalPages) return;
-    void loadCatalog(catalogPage + 1, searchQuery.trim(), selectedGenre, selectedCategory);
+    void loadCatalog(catalogPage + 1, searchQuery.trim(), selectedGenre, selectedCategory, sortBy);
   }
 
   function handleSwitchView(next: BrowseView) {
@@ -211,16 +232,46 @@ export default function ProvidersScreen() {
     if (next === 'library') void loadLibrary();
   }
 
-  const catalogItems: WorkListItem[] = catalog.map((w) => ({ slug: w.slug, title: w.title, coverUrl: w.coverUrl, type: w.type }));
-  const libraryItems: WorkListItem[] = library.map((l) => ({ slug: l.workSlug, title: l.workTitle, coverUrl: null }));
-  const listData = view === 'catalog' ? catalogItems : libraryItems;
+  const catalogItems: WorkListItem[] = catalog.map((w) => ({
+    slug: w.slug,
+    title: w.title,
+    coverUrl: w.coverUrl,
+    type: w.type,
+    chapterCount: w.chapterCount,
+  }));
+  const libraryItems: WorkListItem[] = Array.from(
+    new Map(library.map((l) => [l.workSlug, { slug: l.workSlug, title: l.workTitle, coverUrl: null }])).values()
+  );
+  // Client-side sort applied on top of whatever the server returned, so ordering
+  // stays correct across accumulated pages even if the API ignores the `sort` param.
+  const listData =
+    view === 'catalog'
+      ? [...catalogItems].sort((a, b) => {
+          if (sortBy === 'title_desc') return b.title.localeCompare(a.title, 'pt-BR');
+          if (sortBy === 'chapters_desc') return (b.chapterCount ?? 0) - (a.chapterCount ?? 0);
+          if (sortBy === 'relevance') return 0;
+          return a.title.localeCompare(b.title, 'pt-BR');
+        })
+      : [...libraryItems].sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'));
   const listLoading = view === 'catalog' ? loadingCatalog : loadingLibrary;
   const listError = view === 'catalog' ? catalogError : null;
+  const activeCategoryLabel = categories.find((c) => c.slug === selectedCategory)?.label ?? selectedCategory;
+  const hasActiveFilters = Boolean(selectedCategory || selectedGenre);
 
   return (
     <ScreenContainer>
       <View style={styles.header}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Site conectado</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
+          Site conectado
+        </Text>
+        {session && view === 'catalog' ? (
+          <Pressable
+            hitSlop={8}
+            style={[styles.filterButton, { borderColor: colors.border }, hasActiveFilters && { backgroundColor: colors.accent, borderColor: colors.accent }]}
+            onPress={() => setFilterModalVisible(true)}>
+            <Ionicons name="options-outline" size={18} color={hasActiveFilters ? colors.background : colors.text} />
+          </Pressable>
+        ) : null}
       </View>
 
       {!hydrated ? (
@@ -265,54 +316,29 @@ export default function ProvidersScreen() {
                 {loadingCatalog ? <ActivityIndicator size="small" color={colors.accent} /> : null}
               </View>
 
-              {view === 'catalog' && categories.length > 0 ? (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.genreRow}>
-                  {categories.map((category) => {
-                    const active = selectedCategory === category.slug;
-                    return (
-                      <Pressable
-                        key={category.slug}
-                        style={[
-                          styles.genreChip,
-                          { borderColor: colors.border },
-                          active && { backgroundColor: colors.accent, borderColor: colors.accent },
-                        ]}
-                        onPress={() => handleSelectCategory(category.slug)}>
-                        <Text style={[styles.genreChipText, { color: active ? colors.background : colors.text }]}>
-                          {category.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              ) : null}
-
-              {view === 'catalog' && genres.length > 0 ? (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.genreRow}>
-                  {genres.map((genre) => {
-                    const active = selectedGenre === genre;
-                    return (
-                      <Pressable
-                        key={genre}
-                        style={[
-                          styles.genreChip,
-                          { borderColor: colors.border },
-                          active && { backgroundColor: colors.accent, borderColor: colors.accent },
-                        ]}
-                        onPress={() => handleSelectGenre(genre)}>
-                        <Text style={[styles.genreChipText, { color: active ? colors.background : colors.text }]}>
-                          {genreLabel(genre)}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
+              {view === 'catalog' && hasActiveFilters ? (
+                <View style={styles.activeFiltersRow}>
+                  {selectedCategory ? (
+                    <Pressable
+                      style={[styles.activeFilterChip, { backgroundColor: colors.accent }]}
+                      onPress={() => handleSelectCategory(selectedCategory)}>
+                      <Text style={[styles.activeFilterChipText, { color: colors.background }]} numberOfLines={1}>
+                        {activeCategoryLabel}
+                      </Text>
+                      <Ionicons name="close" size={13} color={colors.background} />
+                    </Pressable>
+                  ) : null}
+                  {selectedGenre ? (
+                    <Pressable
+                      style={[styles.activeFilterChip, { backgroundColor: colors.accent }]}
+                      onPress={() => handleSelectGenre(selectedGenre)}>
+                      <Text style={[styles.activeFilterChipText, { color: colors.background }]} numberOfLines={1}>
+                        {genreLabel(selectedGenre)}
+                      </Text>
+                      <Ionicons name="close" size={13} color={colors.background} />
+                    </Pressable>
+                  ) : null}
+                </View>
               ) : null}
 
               <View style={[styles.segmented, { borderColor: colors.border }]}>
@@ -378,88 +404,240 @@ export default function ProvidersScreen() {
           )}
         />
       ) : (
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Ionicons name="cloud-outline" size={32} color={colors.textMuted} />
-          <Text style={[styles.cardTitle, { color: colors.text }]}>Conectar a um site</Text>
-          <Text style={[styles.cardDescription, { color: colors.textMuted }]}>
-            Informe o domínio do site, seu e-mail e senha para sincronizar sua biblioteca e
-            baixar capítulos pelo app. Contas sem assinatura ativa também podem conectar — nesse
-            caso, apenas obras ou capítulos gratuitos ficam disponíveis para leitura.
-          </Text>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.loginAvoidingView}>
+          <ScrollView
+            contentContainerStyle={styles.loginScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
+            <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={[styles.cardIconWrap, { backgroundColor: colors.surfaceAlt }]}>
+                <Ionicons name="cloud-outline" size={30} color={colors.accent} />
+              </View>
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Conectar a um site</Text>
+              <Text style={[styles.cardDescription, { color: colors.textMuted }]}>
+                Informe o domínio do site, seu e-mail e senha para sincronizar sua biblioteca e
+                baixar capítulos pelo app. Contas sem assinatura ativa também podem conectar — nesse
+                caso, apenas obras ou capítulos gratuitos ficam disponíveis para leitura.
+              </Text>
 
-          <TextInput
-            style={[styles.input, { borderColor: colors.border, color: colors.text }]}
-            placeholder="Domínio (ex: meusite.com)"
-            placeholderTextColor={colors.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            value={domain}
-            onChangeText={(value) => {
-              setDomain(value);
-              clearError();
-            }}
-          />
-          <TextInput
-            style={[styles.input, { borderColor: colors.border, color: colors.text }]}
-            placeholder="E-mail"
-            placeholderTextColor={colors.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="email-address"
-            value={email}
-            onChangeText={(value) => {
-              setEmail(value);
-              clearError();
-            }}
-          />
-          <TextInput
-            style={[styles.input, { borderColor: colors.border, color: colors.text }]}
-            placeholder="Senha"
-            placeholderTextColor={colors.textMuted}
-            secureTextEntry
-            value={password}
-            onChangeText={(value) => {
-              setPassword(value);
-              clearError();
-            }}
-          />
+              <View style={[styles.inputRow, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}>
+                <Ionicons name="globe-outline" size={18} color={colors.textMuted} />
+                <TextInput
+                  style={[styles.inputRowField, { color: colors.text }]}
+                  placeholder="Domínio (ex: meusite.com)"
+                  placeholderTextColor={colors.textMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  value={domain}
+                  onChangeText={(value) => {
+                    setDomain(value);
+                    clearError();
+                  }}
+                />
+              </View>
+              <View style={[styles.inputRow, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}>
+                <Ionicons name="mail-outline" size={18} color={colors.textMuted} />
+                <TextInput
+                  style={[styles.inputRowField, { color: colors.text }]}
+                  placeholder="E-mail"
+                  placeholderTextColor={colors.textMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="email-address"
+                  value={email}
+                  onChangeText={(value) => {
+                    setEmail(value);
+                    clearError();
+                  }}
+                />
+              </View>
+              <View style={[styles.inputRow, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}>
+                <Ionicons name="lock-closed-outline" size={18} color={colors.textMuted} />
+                <TextInput
+                  style={[styles.inputRowField, { color: colors.text }]}
+                  placeholder="Senha"
+                  placeholderTextColor={colors.textMuted}
+                  secureTextEntry={!showPassword}
+                  value={password}
+                  onChangeText={(value) => {
+                    setPassword(value);
+                    clearError();
+                  }}
+                />
+                <Pressable hitSlop={8} onPress={() => setShowPassword((v) => !v)}>
+                  <Ionicons
+                    name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                    size={18}
+                    color={colors.textMuted}
+                  />
+                </Pressable>
+              </View>
 
-          {error ? <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text> : null}
+              {error ? <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text> : null}
 
-          <Pressable
-            style={[styles.button, styles.primaryButton, { borderColor: colors.accent, backgroundColor: colors.accent }]}
-            disabled={connecting || !domain || !email || !password}
-            onPress={() => void handleConnect()}>
-            {connecting ? (
-              <ActivityIndicator color={colors.background} />
-            ) : (
-              <Text style={[styles.buttonText, { color: colors.background }]}>Conectar</Text>
-            )}
-          </Pressable>
+              <Pressable
+                style={[styles.button, styles.primaryButton, { borderColor: colors.accent, backgroundColor: colors.accent }]}
+                disabled={connecting || !domain || !email || !password}
+                onPress={() => void handleConnect()}>
+                {connecting ? (
+                  <ActivityIndicator color={colors.background} />
+                ) : (
+                  <Text style={[styles.buttonText, { color: colors.background }]}>Conectar</Text>
+                )}
+              </Pressable>
 
-          <Text style={[styles.hint, { color: colors.textMuted }]}>
-            Ao conectar, sua sessão ativa no site (navegador) pode ser encerrada, já que apenas um
-            dispositivo pode ficar logado por vez na mesma conta.
-          </Text>
-        </View>
+              <Text style={[styles.hint, { color: colors.textMuted }]}>
+                Ao conectar, sua sessão ativa no site (navegador) pode ser encerrada, já que apenas um
+                dispositivo pode ficar logado por vez na mesma conta.
+              </Text>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       )}
+
+      <Modal visible={filterModalVisible} animationType="slide" transparent onRequestClose={() => setFilterModalVisible(false)}>
+        <View style={styles.backdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setFilterModalVisible(false)} />
+          <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.sheetHeader}>
+              <Text style={[styles.sheetTitle, { color: colors.text }]}>Ajustar busca</Text>
+              <Pressable hitSlop={10} onPress={() => setFilterModalVisible(false)}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </Pressable>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetScrollContent}>
+              <Text style={[styles.sheetSectionLabel, { color: colors.textMuted }]}>Ordenar por</Text>
+              <View style={styles.chipWrap}>
+                {SORT_OPTIONS.map((option) => {
+                  const active = sortBy === option.key;
+                  return (
+                    <Pressable
+                      key={option.key}
+                      style={[
+                        styles.genreChip,
+                        { borderColor: colors.border },
+                        active && { backgroundColor: colors.accent, borderColor: colors.accent },
+                      ]}
+                      onPress={() => handleSelectSort(option.key)}>
+                      <Text style={[styles.genreChipText, { color: active ? colors.background : colors.text }]}>
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {categories.length > 0 ? (
+                <>
+                  <Text style={[styles.sheetSectionLabel, { color: colors.textMuted }]}>Categoria</Text>
+                  <View style={styles.chipWrap}>
+                    {categories.map((category) => {
+                      const active = selectedCategory === category.slug;
+                      return (
+                        <Pressable
+                          key={category.slug}
+                          style={[
+                            styles.genreChip,
+                            { borderColor: colors.border },
+                            active && { backgroundColor: colors.accent, borderColor: colors.accent },
+                          ]}
+                          onPress={() => handleSelectCategory(category.slug)}>
+                          <Text style={[styles.genreChipText, { color: active ? colors.background : colors.text }]}>
+                            {category.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </>
+              ) : null}
+
+              {genres.length > 0 ? (
+                <>
+                  <Text style={[styles.sheetSectionLabel, { color: colors.textMuted }]}>Gênero</Text>
+                  <View style={styles.chipWrap}>
+                    {genres.map((genre) => {
+                      const active = selectedGenre === genre;
+                      return (
+                        <Pressable
+                          key={genre}
+                          style={[
+                            styles.genreChip,
+                            { borderColor: colors.border },
+                            active && { backgroundColor: colors.accent, borderColor: colors.accent },
+                          ]}
+                          onPress={() => handleSelectGenre(genre)}>
+                          <Text style={[styles.genreChipText, { color: active ? colors.background : colors.text }]}>
+                            {genreLabel(genre)}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </>
+              ) : null}
+
+              <Pressable
+                style={[styles.button, styles.primaryButton, { borderColor: colors.accent, backgroundColor: colors.accent, marginTop: 20 }]}
+                onPress={() => setFilterModalVisible(false)}>
+                <Text style={[styles.buttonText, { color: colors.background }]}>Concluído</Text>
+              </Pressable>
+              {hasActiveFilters ? (
+                <Pressable
+                  style={styles.clearFiltersButton}
+                  onPress={() => {
+                    if (selectedCategory) handleSelectCategory(selectedCategory);
+                    if (selectedGenre) handleSelectGenre(selectedGenre);
+                  }}>
+                  <Text style={[styles.clearFiltersText, { color: colors.danger }]}>Limpar filtros</Text>
+                </Pressable>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 12,
   },
   headerTitle: {
+    flexShrink: 1,
     fontSize: 26,
     fontWeight: '700',
   },
+  filterButton: {
+    flexShrink: 0,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   loading: {
     marginTop: 32,
+  },
+  loginAvoidingView: {
+    flex: 1,
+  },
+  loginScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingVertical: 24,
   },
   card: {
     marginHorizontal: 16,
@@ -468,6 +646,14 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     gap: 10,
+  },
+  cardIconWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
   },
   cardTitle: {
     fontSize: 16,
@@ -478,12 +664,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 19,
   },
-  input: {
+  inputRow: {
     width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 4,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
+  },
+  inputRowField: {
+    flex: 1,
+    paddingVertical: 12,
     fontSize: 14,
   },
   button: {
@@ -531,12 +724,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  genreRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 12,
-    paddingRight: 4,
-  },
   genreChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -545,6 +732,74 @@ const styles = StyleSheet.create({
   },
   genreChipText: {
     fontSize: 12,
+    fontWeight: '600',
+  },
+  activeFiltersRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  activeFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    maxWidth: 200,
+  },
+  activeFilterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  backdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  sheet: {
+    maxHeight: '80%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingTop: 16,
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginBottom: 8,
+  },
+  sheetTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  sheetScrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 28,
+  },
+  sheetSectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  clearFiltersButton: {
+    marginTop: 14,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  clearFiltersText: {
+    fontSize: 13,
     fontWeight: '600',
   },
   searchBar: {

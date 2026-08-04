@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { EmptyState } from '@/src/components/common/EmptyState';
@@ -31,9 +31,33 @@ export default function SeriesDetailScreen() {
     setLoading(false);
   }, [id]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load])
+  );
+
+  // Resume point: prefer a chapter left mid-read; otherwise the next unread
+  // chapter (by sort order) after the last one finished.
+  const continueTarget = useMemo(() => {
+    if (chapters.length === 0) return null;
+    const withProgress = chapters.map((c) => ({
+      chapter: c,
+      progress: c.page_count > 0 ? c.last_page / c.page_count : 0,
+    }));
+    const inProgress = withProgress
+      .filter((c) => c.progress > 0 && c.progress < 0.9)
+      .sort((a, b) => b.chapter.sort_order - a.chapter.sort_order)[0];
+    if (inProgress) return inProgress.chapter;
+
+    const completedOrders = withProgress.filter((c) => c.progress >= 0.9).map((c) => c.chapter.sort_order);
+    if (completedOrders.length > 0) {
+      const lastCompleted = Math.max(...completedOrders);
+      const next = [...chapters].sort((a, b) => a.sort_order - b.sort_order).find((c) => c.sort_order > lastCompleted);
+      if (next) return next;
+    }
+    return null;
+  }, [chapters]);
 
   async function handleToggleFavorite() {
     if (!id) return;
@@ -77,9 +101,19 @@ export default function SeriesDetailScreen() {
           )}
         </View>
         <View style={styles.headerInfo}>
-          <Text style={[styles.title, { color: colors.text }]} numberOfLines={3}>
-            {series?.title}
-          </Text>
+          <View style={styles.titleRow}>
+            <Text style={[styles.title, { color: colors.text }]} numberOfLines={3}>
+              {series?.title}
+            </Text>
+            <Pressable hitSlop={8} onPress={() => router.push({ pathname: '/series/edit/[id]', params: { id: id! } })}>
+              <Ionicons name="create-outline" size={20} color={colors.textMuted} />
+            </Pressable>
+          </View>
+          {series?.genre ? (
+            <View style={[styles.genreBadge, { borderColor: colors.border }]}>
+              <Text style={[styles.genreBadgeText, { color: colors.textMuted }]}>{series.genre}</Text>
+            </View>
+          ) : null}
           <Pressable style={styles.favoriteRow} onPress={handleToggleFavorite}>
             <Ionicons
               name={series?.favorite ? 'star' : 'star-outline'}
@@ -92,6 +126,23 @@ export default function SeriesDetailScreen() {
           </Pressable>
         </View>
       </View>
+
+      {series?.description ? (
+        <Text style={[styles.description, { color: colors.textMuted }]} numberOfLines={6}>
+          {series.description}
+        </Text>
+      ) : null}
+
+      {continueTarget ? (
+        <Pressable
+          style={[styles.continueButton, { backgroundColor: colors.accent }]}
+          onPress={() => router.push(`/reader/${continueTarget.id}`)}>
+          <Ionicons name="play" size={16} color={colors.background} />
+          <Text style={[styles.continueButtonText, { color: colors.background }]}>
+            Continuar: {continueTarget.title}
+          </Text>
+        </Pressable>
+      ) : null}
 
       <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>
         {chapters.length} {chapters.length === 1 ? 'capítulo' : 'capítulos'}
@@ -164,9 +215,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
   title: {
+    flex: 1,
     fontSize: 18,
     fontWeight: '700',
+  },
+  genreBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  genreBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
   favoriteRow: {
     flexDirection: 'row',
@@ -175,6 +243,26 @@ const styles = StyleSheet.create({
   },
   favoriteText: {
     fontSize: 13,
+  },
+  description: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginHorizontal: 16,
+    marginTop: 12,
+  },
+  continueButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  continueButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   sectionTitle: {
     fontSize: 12,

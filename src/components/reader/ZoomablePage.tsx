@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useState } from 'react';
-import { Dimensions, StyleSheet } from 'react-native';
+import { ActivityIndicator, Dimensions, StyleSheet } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
     runOnJS,
@@ -24,6 +24,7 @@ export function ZoomablePage({ uri, onTap }: ZoomablePageProps) {
   const savedTranslateX = useSharedValue(0);
   const savedTranslateY = useSharedValue(0);
   const [zoomed, setZoomed] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const pinch = Gesture.Pinch()
     .onUpdate((event) => {
@@ -56,16 +57,25 @@ export function ZoomablePage({ uri, onTap }: ZoomablePageProps) {
 
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
-    .onEnd(() => {
+    .onEnd((event) => {
       const next = savedScale.value > 1 ? 1 : 2.5;
-      scale.value = withTiming(next);
-      savedScale.value = next;
       if (next === 1) {
         translateX.value = withTiming(0);
         translateY.value = withTiming(0);
         savedTranslateX.value = 0;
         savedTranslateY.value = 0;
+      } else {
+        // Keep the tapped point under the finger by translating it back to
+        // center as we scale up around the view's center.
+        const targetX = next * (SCREEN_WIDTH / 2 - event.x);
+        const targetY = next * (SCREEN_HEIGHT / 2 - event.y);
+        translateX.value = withTiming(targetX);
+        translateY.value = withTiming(targetY);
+        savedTranslateX.value = targetX;
+        savedTranslateY.value = targetY;
       }
+      scale.value = withTiming(next);
+      savedScale.value = next;
       runOnJS(setZoomed)(next > 1);
     });
 
@@ -91,7 +101,17 @@ export function ZoomablePage({ uri, onTap }: ZoomablePageProps) {
   return (
     <GestureDetector gesture={composed}>
       <Animated.View style={[styles.container, animatedStyle]}>
-        <Image source={{ uri }} style={styles.image} contentFit="contain" />
+        <Image
+          source={{ uri }}
+          style={styles.image}
+          contentFit="contain"
+          onLoadStart={() => setLoading(true)}
+          onLoad={() => setLoading(false)}
+          onError={() => setLoading(false)}
+        />
+        {loading ? (
+          <ActivityIndicator style={styles.loading} size="large" color="#fff" />
+        ) : null}
       </Animated.View>
     </GestureDetector>
   );
@@ -105,5 +125,12 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+  },
+  loading: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
 });

@@ -10,6 +10,7 @@ import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
 import { migrateDatabase } from '@/src/db/schema';
+import { useThemeStore } from '@/src/state/themeStore';
 
 export {
     // Catch any errors thrown by the Layout component.
@@ -28,6 +29,8 @@ export default function RootLayout() {
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
   const [dbReady, setDbReady] = useState(false);
+  const themeHydrated = useThemeStore((state) => state.hydrated);
+  const hydrateTheme = useThemeStore((state) => state.hydrate);
 
   // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
@@ -41,7 +44,8 @@ export default function RootLayout() {
         console.error('Falha ao migrar banco de dados', migrationError);
         setDbReady(true);
       });
-  }, []);
+    void hydrateTheme();
+  }, [hydrateTheme]);
 
   useEffect(() => {
     if (loaded && dbReady) {
@@ -49,7 +53,7 @@ export default function RootLayout() {
     }
   }, [loaded, dbReady]);
 
-  if (!loaded || !dbReady) {
+  if (!loaded || !dbReady || !themeHydrated) {
     // Mirrors the native splash (same background/icon) so there's no blank
     // flash between the native splash hiding and the app finishing setup.
     return (
@@ -82,7 +86,9 @@ const styles = StyleSheet.create({
 
 
 function RootLayoutNav() {
-  const colorScheme = useColorScheme();
+  const systemScheme = useColorScheme();
+  const preference = useThemeStore((state) => state.preference);
+  const colorScheme = preference === 'system' ? systemScheme : preference;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -96,9 +102,17 @@ function RootLayoutNav() {
           }}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="series/[id]" options={{ headerShown: true }} />
+          <Stack.Screen name="series/edit/[id]" options={{ headerShown: true }} />
           <Stack.Screen name="reader/[chapterId]" options={{ headerShown: false }} />
           <Stack.Screen name="provider/[slug]" options={{ headerShown: true }} />
           <Stack.Screen name="provider-reader/[chapterId]" options={{ headerShown: false }} />
+          <Stack.Screen name="settings/reading" options={{ headerShown: true }} />
+          <Stack.Screen name="settings/storage" options={{ headerShown: true }} />
+          <Stack.Screen name="settings/appearance" options={{ headerShown: true }} />
+          <Stack.Screen name="settings/trackers" options={{ headerShown: true }} />
+          <Stack.Screen name="settings/news" options={{ headerShown: true }} />
+          <Stack.Screen name="settings/upload-server" options={{ headerShown: true }} />
+          <Stack.Screen name="downloads" options={{ headerShown: true }} />
         </Stack>
       </ThemeProvider>
     </GestureHandlerRootView>

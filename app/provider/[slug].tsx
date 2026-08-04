@@ -40,7 +40,7 @@ export default function ProviderWorkScreen() {
   const router = useRouter();
   const { colors } = useAppTheme();
   const { session } = useContentProviderStore();
-  const { statuses, errors: queueErrors, enqueue, clearError } = useDownloadQueueStore();
+  const { statuses, errors: queueErrors, enqueue, removeItem } = useDownloadQueueStore();
 
   const [work, setWork] = useState<ProviderWorkDetail | null>(null);
   const [chapters, setChapters] = useState<ProviderChapterSummary[]>([]);
@@ -52,6 +52,7 @@ export default function ProviderWorkScreen() {
   const [chapterQuery, setChapterQuery] = useState('');
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [readNumbers, setReadNumbers] = useState<Set<number>>(new Set());
+  const [history, setHistory] = useState<{ chapterNumber: string; progressPercent: number }[]>([]);
 
   // Serializes save/unsave calls in the order the user issued them, so a fast
   // tap-then-navigate-away doesn't let an older request finish after a newer one.
@@ -72,6 +73,7 @@ export default function ProviderWorkScreen() {
       setWork(workDetail);
       setChapters(chapterList);
       setSaved(libraryItems.some((item) => item.workSlug === workDetail.slug));
+      setHistory(history);
       setReadNumbers(
         new Set(
           history.filter((h) => h.progressPercent >= 90).map((h) => Number(h.chapterNumber))
@@ -132,20 +134,32 @@ export default function ProviderWorkScreen() {
   function handleDownload(chapter: ProviderChapterSummary) {
     if (!session || !work) return;
     const key = downloadKey(work.slug, chapter.id);
-    if (queueErrors[key]) clearError(key);
+    if (queueErrors[key]) removeItem(key);
     enqueue(session, work, chapter);
   }
 
   function handleDownloadRead() {
     if (!session || !work) return;
-    for (const chapter of chapters) {
-      if (!readNumbers.has(chapter.number)) continue;
-      if (downloadedIds.has(chapter.id)) continue;
-      const key = downloadKey(work.slug, chapter.id);
-      const status = statuses[key];
-      if (status === 'queued' || status === 'downloading' || status === 'done') continue;
-      enqueue(session, work, chapter);
-    }
+    const pending = chapters.filter((chapter) => {
+      if (!readNumbers.has(chapter.number)) return false;
+      if (downloadedIds.has(chapter.id)) return false;
+      const status = statuses[downloadKey(work.slug, chapter.id)];
+      return status !== 'queued' && status !== 'downloading' && status !== 'done';
+    });
+    if (pending.length === 0) return;
+    Alert.alert(
+      'Baixar capítulos lidos?',
+      `${pending.length} capítulo(s) que você já leu ainda não estão salvos no dispositivo. Deseja baixá-los agora para leitura offline?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Baixar',
+          onPress: () => {
+            for (const chapter of pending) enqueue(session, work, chapter);
+          },
+        },
+      ]
+    );
   }
 
   function handleDeleteDownload(chapter: ProviderChapterSummary) {
@@ -184,6 +198,28 @@ export default function ProviderWorkScreen() {
     list = [...list].sort((a, b) => (reversed ? a.number - b.number : b.number - a.number));
     return list;
   }, [chapters, chapterQuery, reversed]);
+
+  // Resume point: prefer a chapter left mid-read; otherwise the next unread
+  // chapter after the last one finished.
+  const continueTarget = useMemo(() => {
+    if (chapters.length === 0) return null;
+    const byNumber = new Map(chapters.map((c) => [c.number, c]));
+    const inProgress = [...history]
+      .filter((h) => h.progressPercent > 0 && h.progressPercent < 90)
+      .sort((a, b) => Number(b.chapterNumber) - Number(a.chapterNumber))[0];
+    if (inProgress) {
+      const chapter = byNumber.get(Number(inProgress.chapterNumber));
+      if (chapter && !chapter.isLocked) return chapter;
+    }
+    if (readNumbers.size > 0) {
+      const lastRead = Math.max(...readNumbers);
+      const next = [...chapters]
+        .sort((a, b) => a.number - b.number)
+        .find((c) => c.number > lastRead && !c.isLocked);
+      if (next) return next;
+    }
+    return null;
+  }, [chapters, history, readNumbers]);
 
   const readToDownloadCount = chapters.filter(
     (c) => readNumbers.has(c.number) && !downloadedIds.has(c.id)
@@ -276,6 +312,22 @@ export default function ProviderWorkScreen() {
               </View>
             </View>
 
+            {continueTarget ? (
+              <Pressable
+                style={[styles.continueButton, { backgroundColor: colors.accent }]}
+                onPress={() =>
+                  router.push({
+                    pathname: '/provider-reader/[chapterId]',
+                    params: { chapterId: continueTarget.id, slug: work.slug, title: work.title },
+                  })
+                }>
+                <Ionicons name="play" size={16} color={colors.background} />
+                <Text style={[styles.continueButtonText, { color: colors.background }]}>
+                  Continuar capítulo {continueTarget.number}
+                </Text>
+              </Pressable>
+            ) : null}
+
             {work.description ? (
               <View>
                 <Text
@@ -358,19 +410,23 @@ export default function ProviderWorkScreen() {
               {item.isLocked ? (
                 <Ionicons name="lock-closed" size={16} color={colors.textMuted} />
               ) : queueError ? (
-                <Pressable hitSlop={10} onPress={() => handleDownload(item)}>
+                <Pressable style={styles.chapterStatusWrap} hitSlop={10} onPress={() => handleDownload(item)}>
                   <Ionicons name="alert-circle" size={20} color={colors.danger} />
                 </Pressable>
               ) : status === 'queued' ? (
-                <Ionicons name="time-outline" size={20} color={colors.textMuted} />
+                <View style={styles.chapterStatusWrap}>
+                  <Ionicons name="time-outline" size={20} color={colors.textMuted} />
+                </View>
               ) : status === 'downloading' ? (
-                <ActivityIndicator size="small" color={colors.accent} />
+                <View style={styles.chapterStatusWrap}>
+                  <ActivityIndicator size="small" color={colors.accent} />
+                </View>
               ) : downloadedIds.has(item.id) ? (
-                <Pressable hitSlop={10} onPress={() => handleDeleteDownload(item)}>
+                <Pressable style={styles.chapterStatusWrap} hitSlop={10} onPress={() => handleDeleteDownload(item)}>
                   <Ionicons name="checkmark-circle" size={20} color={colors.accent} />
                 </Pressable>
               ) : (
-                <Pressable hitSlop={10} style={styles.downloadButton} onPress={() => handleDownload(item)}>
+                <Pressable style={styles.chapterStatusWrap} hitSlop={10} onPress={() => handleDownload(item)}>
                   <Ionicons name="cloud-download-outline" size={20} color={colors.textMuted} />
                 </Pressable>
               )}
@@ -440,6 +496,19 @@ const styles = StyleSheet.create({
   favoriteText: {
     fontSize: 13,
   },
+  continueButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 16,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  continueButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
   authorText: {
     fontSize: 12,
   },
@@ -505,7 +574,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
-  downloadButton: {
-    padding: 4,
+  chapterStatusWrap: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

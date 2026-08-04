@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { ActivityIndicator, StyleSheet } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
     runOnJS,
@@ -27,6 +27,7 @@ export function ZoomableVerticalPage({ uri, width, height, onTap, onZoomChange, 
   const savedTranslateX = useSharedValue(0);
   const savedTranslateY = useSharedValue(0);
   const [zoomed, setZoomed] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const notifyZoomChange = (value: boolean) => {
     setZoomed(value);
@@ -71,16 +72,25 @@ export function ZoomableVerticalPage({ uri, width, height, onTap, onZoomChange, 
 
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
-    .onEnd(() => {
+    .onEnd((event) => {
       const next = savedScale.value > 1 ? 1 : 2.5;
-      scale.value = withTiming(next);
-      savedScale.value = next;
       if (next === 1) {
         translateX.value = withTiming(0);
         translateY.value = withTiming(0);
         savedTranslateX.value = 0;
         savedTranslateY.value = 0;
+      } else {
+        // Keep the tapped point under the finger by translating it back to
+        // center as we scale up around the view's center.
+        const targetX = next * (width / 2 - event.x);
+        const targetY = next * (height / 2 - event.y);
+        translateX.value = withTiming(targetX);
+        translateY.value = withTiming(targetY);
+        savedTranslateX.value = targetX;
+        savedTranslateY.value = targetY;
       }
+      scale.value = withTiming(next);
+      savedScale.value = next;
       runOnJS(notifyZoomChange)(next > 1);
     });
 
@@ -107,12 +117,18 @@ export function ZoomableVerticalPage({ uri, width, height, onTap, onZoomChange, 
         <Image
           source={{ uri }}
           style={styles.image}
-          contentFit="cover"
+          contentFit="contain"
+          onLoadStart={() => setLoading(true)}
           onLoad={(event) => {
+            setLoading(false);
             const { width: w, height: h } = event.source;
             if (w && h) onLoad(w, h);
           }}
+          onError={() => setLoading(false)}
         />
+        {loading ? (
+          <ActivityIndicator style={styles.loading} size="large" color="#fff" />
+        ) : null}
       </Animated.View>
     </GestureDetector>
   );
@@ -122,5 +138,12 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+  },
+  loading: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
 });

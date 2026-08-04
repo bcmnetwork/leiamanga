@@ -3,6 +3,8 @@ export interface SeriesRow {
   title: string;
   folder_path: string | null;
   cover_path: string | null;
+  description: string | null;
+  genre: string | null;
   favorite: number;
   created_at: number;
 }
