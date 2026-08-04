@@ -46,5 +46,17 @@
     "web": "expo start --web",
     "postinstall": "patch-package"
   },
+  "overrides": {
+    "react-native-http-bridge-refurbished": {
+      "react": "$react"
+    }
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": ["react-native-http-bridge-refurbished"]
+      }
+    }
+  },
   "private": true
 }
