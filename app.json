@@ -43,7 +43,8 @@
       "expo-sqlite",
       "expo-document-picker",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "./plugins/withAndroidExcludeLegacySupportLibrary.js"
     ],
     "experiments": {
       "typedRoutes": true
