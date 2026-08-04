@@ -188,7 +188,7 @@ function ProviderReaderScreenContent({ chapterId, slug, title }: ProviderReaderS
             <View
               style={[
                 styles.endOfChapterInline,
-                { backgroundColor: colors.background, paddingBottom: 28 + insets.bottom },
+                { backgroundColor: colors.overlay, paddingBottom: 28 + insets.bottom },
               ]}>
               {endOfChapterContent}
             </View>

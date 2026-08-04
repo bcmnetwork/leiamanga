@@ -10,13 +10,7 @@ import { EmptyState } from '@/src/components/common/EmptyState';
 import { PagedReader } from '@/src/components/reader/PagedReader';
 import { ReaderQuickSettingsButton } from '@/src/components/reader/ReaderQuickSettingsButton';
 import { VerticalReader, type VerticalReaderHandle } from '@/src/components/reader/VerticalReader';
-import {
-    getAdjacentChapter,
-    getProgress,
-    getSeriesById,
-    saveProgress,
-    toggleFavorite,
-} from '@/src/db/repository';
+import { getAdjacentChapter, getProgress, saveProgress } from '@/src/db/repository';
 import type { ChapterRow } from '@/src/db/types';
 import { useChapterPages } from '@/src/reader/useChapterPages';
 import { useReaderSettingsStore } from '@/src/state/readerSettingsStore';
@@ -43,7 +37,6 @@ function ReaderScreenContent({ chapterId }: { chapterId: string }) {
   const [currentPage, setCurrentPage] = useState(0);
   const [initialPage, setInitialPage] = useState(0);
   const [reachedEnd, setReachedEnd] = useState(false);
-  const [favorite, setFavorite] = useState(false);
   const [nextChapter, setNextChapter] = useState<ChapterRow | null>(null);
   const initializedRef = useRef(false);
   const verticalReaderRef = useRef<VerticalReaderHandle>(null);
@@ -51,18 +44,6 @@ function ReaderScreenContent({ chapterId }: { chapterId: string }) {
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
-
-  useEffect(() => {
-    if (!chapter?.series_id) return;
-    let cancelled = false;
-    (async () => {
-      const series = await getSeriesById(chapter.series_id);
-      if (!cancelled && series) setFavorite(Boolean(series.favorite));
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [chapter?.series_id]);
 
   useEffect(() => {
     if (!chapter) {
@@ -78,12 +59,6 @@ function ReaderScreenContent({ chapterId }: { chapterId: string }) {
       cancelled = true;
     };
   }, [chapter]);
-
-  async function handleToggleFavorite() {
-    if (!chapter?.series_id) return;
-    setFavorite((v) => !v);
-    await toggleFavorite(chapter.series_id);
-  }
 
   function handleGoToNextChapter() {
     if (!nextChapter) return;
@@ -178,7 +153,7 @@ function ReaderScreenContent({ chapterId }: { chapterId: string }) {
             <View
               style={[
                 styles.endOfChapterInline,
-                { backgroundColor: colors.background, paddingBottom: 28 + insets.bottom },
+                { backgroundColor: colors.overlay, paddingBottom: 28 + insets.bottom },
               ]}>
               {endOfChapterContent}
             </View>
@@ -211,11 +186,6 @@ function ReaderScreenContent({ chapterId }: { chapterId: string }) {
               Página {currentPage + 1} de {pageUris.length}
             </Text>
           </View>
-          {chapter?.series_id ? (
-            <Pressable hitSlop={8} onPress={() => void handleToggleFavorite()}>
-              <Ionicons name={favorite ? 'heart' : 'heart-outline'} size={22} color="#fff" />
-            </Pressable>
-          ) : null}
           <ReaderQuickSettingsButton
             mode={mode}
             direction={direction}
