@@ -1,0 +1,56 @@
+import * as DocumentPicker from 'expo-document-picker';
+import { Directory, Paths } from 'expo-file-system';
+
+import { createChapter, createSeriesIfNeeded } from '../db/repository';
+import { generateId } from '../utils/id';
+import { extractCbzToDirectory } from './extractCbz';
+
+function guessSeriesTitle(fileName: string): string {
+  return fileName.replace(/\.cbz$/i, '').replace(/_/g, ' ').trim();
+}
+
+export interface ImportSummary {
+  imported: number;
+  failed: number;
+}
+
+export async function pickAndImportCbzFiles(): Promise<ImportSummary> {
+  const result = await DocumentPicker.getDocumentAsync({
+    multiple: true,
+    type: ['application/vnd.comicbook+zip', 'application/zip', 'application/x-cbz', '*/*'],
+    copyToCacheDirectory: true,
+  });
+
+  if (result.canceled) {
+    return { imported: 0, failed: 0 };
+  }
+
+  let imported = 0;
+  let failed = 0;
+
+  for (const asset of result.assets) {
+    try {
+      const chapterId = generateId();
+      const seriesTitle = guessSeriesTitle(asset.name);
+      const seriesId = await createSeriesIfNeeded(seriesTitle);
+      const destDir = new Directory(Paths.document, 'chapters', chapterId);
+      const extracted = await extractCbzToDirectory(asset.uri, destDir);
+
+      await createChapter({
+        id: chapterId,
+        seriesId,
+        title: seriesTitle,
+        sourceUri: asset.uri,
+        pagesDir: extracted.pagesDir,
+        pageFiles: extracted.pageFiles,
+        coverFile: extracted.coverFile,
+      });
+      imported += 1;
+    } catch (error) {
+      console.warn('Falha ao importar CBZ', asset.name, error);
+      failed += 1;
+    }
+  }
+
+  return { imported, failed };
+}
