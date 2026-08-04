@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Dimensions, FlatList } from 'react-native';
 
 import { ZoomableVerticalPage } from './ZoomableVerticalPage';
@@ -20,10 +20,12 @@ interface VerticalReaderProps {
   /** Fires once the user scrolls near the bottom of the chapter — more reliable than
    * watching the last item's viewability, which can flicker in/out on tall pages. */
   onEndReached?: () => void;
+  /** Rendered after the last page as normal scroll content, so it never overlaps the image. */
+  footer?: ReactElement | null;
 }
 
 export const VerticalReader = forwardRef<VerticalReaderHandle, VerticalReaderProps>(function VerticalReader(
-  { pageUris, initialPage, topInset = 0, onPageChange, onToggleOverlay, onEndReached },
+  { pageUris, initialPage, topInset = 0, onPageChange, onToggleOverlay, onEndReached, footer },
   ref
 ) {
   const listRef = useRef<FlatList<string>>(null);
@@ -74,6 +76,7 @@ export const VerticalReader = forwardRef<VerticalReaderHandle, VerticalReaderPro
       viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
       onEndReached={onEndReached}
       onEndReachedThreshold={0.1}
+      ListFooterComponent={footer}
       renderItem={({ item: uri, index }) => (
         <ZoomableVerticalPage
           uri={uri}

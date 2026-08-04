@@ -143,6 +143,24 @@ function ReaderScreenContent({ chapterId }: { chapterId: string }) {
     );
   }
 
+  const endOfChapterContent = (
+    <>
+      <Text style={styles.endOfChapterText}>Fim do capítulo</Text>
+      <View style={styles.endOfChapterActions}>
+        <Pressable style={styles.endOfChapterButton} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={18} color="#fff" />
+          <Text style={styles.endOfChapterButtonText}>Voltar</Text>
+        </Pressable>
+        {nextChapter ? (
+          <Pressable style={styles.endOfChapterButton} onPress={handleGoToNextChapter}>
+            <Text style={styles.endOfChapterButtonText}>Próximo capítulo</Text>
+            <Ionicons name="arrow-forward" size={18} color="#fff" />
+          </Pressable>
+        ) : null}
+      </View>
+    </>
+  );
+
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -156,6 +174,15 @@ function ReaderScreenContent({ chapterId }: { chapterId: string }) {
           onPageChange={setCurrentPage}
           onToggleOverlay={() => setOverlayVisible((v) => !v)}
           onEndReached={() => setReachedEnd(true)}
+          footer={
+            <View
+              style={[
+                styles.endOfChapterInline,
+                { backgroundColor: colors.background, paddingBottom: 28 + insets.bottom },
+              ]}>
+              {endOfChapterContent}
+            </View>
+          }
         />
       ) : (
         <PagedReader
@@ -184,6 +211,11 @@ function ReaderScreenContent({ chapterId }: { chapterId: string }) {
               Página {currentPage + 1} de {pageUris.length}
             </Text>
           </View>
+          {chapter?.series_id ? (
+            <Pressable hitSlop={8} onPress={() => void handleToggleFavorite()}>
+              <Ionicons name={favorite ? 'heart' : 'heart-outline'} size={22} color="#fff" />
+            </Pressable>
+          ) : null}
           <ReaderQuickSettingsButton
             mode={mode}
             direction={direction}
@@ -193,7 +225,7 @@ function ReaderScreenContent({ chapterId }: { chapterId: string }) {
         </View>
       ) : null}
 
-      {mode === 'vertical' && overlayVisible && currentPage < pageUris.length - 1 ? (
+      {mode === 'vertical' && overlayVisible && currentPage < pageUris.length - 1 && !reachedEnd ? (
         <Pressable
           style={[styles.scrollToTopButton, { backgroundColor: colors.overlay, bottom: 32 + insets.bottom }]}
           onPress={() => verticalReaderRef.current?.scrollToTop()}>
@@ -201,27 +233,9 @@ function ReaderScreenContent({ chapterId }: { chapterId: string }) {
         </Pressable>
       ) : null}
 
-      {(mode === 'vertical' ? reachedEnd : currentPage === pageUris.length - 1) ? (
+      {mode !== 'vertical' && currentPage === pageUris.length - 1 ? (
         <View style={[styles.endOfChapter, { backgroundColor: colors.overlay, paddingBottom: 28 + insets.bottom }]}>
-          <Text style={styles.endOfChapterText}>Fim do capítulo</Text>
-          <View style={styles.endOfChapterActions}>
-            <Pressable style={styles.endOfChapterButton} onPress={() => router.back()}>
-              <Ionicons name="arrow-back" size={18} color="#fff" />
-              <Text style={styles.endOfChapterButtonText}>Voltar</Text>
-            </Pressable>
-            {chapter?.series_id ? (
-              <Pressable style={styles.endOfChapterButton} onPress={() => void handleToggleFavorite()}>
-                <Ionicons name={favorite ? 'heart' : 'heart-outline'} size={18} color="#fff" />
-                <Text style={styles.endOfChapterButtonText}>{favorite ? 'Favoritado' : 'Favoritar'}</Text>
-              </Pressable>
-            ) : null}
-            {nextChapter ? (
-              <Pressable style={styles.endOfChapterButton} onPress={handleGoToNextChapter}>
-                <Text style={styles.endOfChapterButtonText}>Próximo capítulo</Text>
-                <Ionicons name="arrow-forward" size={18} color="#fff" />
-              </Pressable>
-            ) : null}
-          </View>
+          {endOfChapterContent}
         </View>
       ) : null}
     </View>
@@ -274,6 +288,13 @@ const styles = StyleSheet.create({
     right: 0,
     paddingHorizontal: 16,
     paddingTop: 14,
+    paddingBottom: 28,
+    alignItems: 'center',
+    gap: 12,
+  },
+  endOfChapterInline: {
+    paddingHorizontal: 16,
+    paddingTop: 24,
     paddingBottom: 28,
     alignItems: 'center',
     gap: 12,
