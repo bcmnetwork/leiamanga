@@ -17,10 +17,13 @@ interface VerticalReaderProps {
   topInset?: number;
   onPageChange: (index: number) => void;
   onToggleOverlay: () => void;
+  /** Fires once the user scrolls near the bottom of the chapter — more reliable than
+   * watching the last item's viewability, which can flicker in/out on tall pages. */
+  onEndReached?: () => void;
 }
 
 export const VerticalReader = forwardRef<VerticalReaderHandle, VerticalReaderProps>(function VerticalReader(
-  { pageUris, initialPage, topInset = 0, onPageChange, onToggleOverlay },
+  { pageUris, initialPage, topInset = 0, onPageChange, onToggleOverlay, onEndReached },
   ref
 ) {
   const listRef = useRef<FlatList<string>>(null);
@@ -69,6 +72,8 @@ export const VerticalReader = forwardRef<VerticalReaderHandle, VerticalReaderPro
       getItemLayout={(_, index) => ({ length: heights[index], offset: offsets[index], index })}
       onViewableItemsChanged={onViewableItemsChanged}
       viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+      onEndReached={onEndReached}
+      onEndReachedThreshold={0.1}
       renderItem={({ item: uri, index }) => (
         <ZoomableVerticalPage
           uri={uri}

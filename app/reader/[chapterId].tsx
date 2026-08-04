@@ -42,6 +42,7 @@ function ReaderScreenContent({ chapterId }: { chapterId: string }) {
   const [overlayVisible, setOverlayVisible] = useState(true);
   const [currentPage, setCurrentPage] = useState(0);
   const [initialPage, setInitialPage] = useState(0);
+  const [reachedEnd, setReachedEnd] = useState(false);
   const [favorite, setFavorite] = useState(false);
   const [nextChapter, setNextChapter] = useState<ChapterRow | null>(null);
   const initializedRef = useRef(false);
@@ -154,6 +155,7 @@ function ReaderScreenContent({ chapterId }: { chapterId: string }) {
           topInset={TOP_OVERLAY_HEIGHT}
           onPageChange={setCurrentPage}
           onToggleOverlay={() => setOverlayVisible((v) => !v)}
+          onEndReached={() => setReachedEnd(true)}
         />
       ) : (
         <PagedReader
@@ -199,8 +201,8 @@ function ReaderScreenContent({ chapterId }: { chapterId: string }) {
         </Pressable>
       ) : null}
 
-      {currentPage === pageUris.length - 1 ? (
-        <View style={[styles.endOfChapter, { backgroundColor: colors.overlay }]}>
+      {(mode === 'vertical' ? reachedEnd : currentPage === pageUris.length - 1) ? (
+        <View style={[styles.endOfChapter, { backgroundColor: colors.overlay, paddingBottom: 28 + insets.bottom }]}>
           <Text style={styles.endOfChapterText}>Fim do capítulo</Text>
           <View style={styles.endOfChapterActions}>
             <Pressable style={styles.endOfChapterButton} onPress={() => router.back()}>
@@ -283,13 +285,15 @@ const styles = StyleSheet.create({
   },
   endOfChapterActions: {
     flexDirection: 'row',
-    gap: 12,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 10,
   },
   endOfChapterButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 20,
     backgroundColor: 'rgba(255,255,255,0.15)',
