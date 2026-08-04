@@ -1,14 +1,16 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { Image } from 'expo-image';
-import { Stack } from 'expo-router';
+import * as Linking from 'expo-linking';
+import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
+import { importCbzFromUri } from '@/src/cbz/importCbz';
 import { migrateDatabase } from '@/src/db/schema';
 import { useThemeStore } from '@/src/state/themeStore';
 
@@ -89,6 +91,37 @@ function RootLayoutNav() {
   const systemScheme = useColorScheme();
   const preference = useThemeStore((state) => state.preference);
   const colorScheme = preference === 'system' ? systemScheme : preference;
+  const router = useRouter();
+
+  // Best-effort: if the OS opened this app with an incoming .cbz file (e.g. "open with" from a
+  // file manager, once the native file-association intent-filters are registered), import it
+  // straight into the library instead of trying to render it as a normal app route.
+  useEffect(() => {
+    function guessFileName(url: string): string {
+      const lastSegment = url.split('/').pop() ?? 'capitulo.cbz';
+      try {
+        return decodeURIComponent(lastSegment);
+      } catch {
+        return lastSegment;
+      }
+    }
+
+    async function handleIncomingUrl(url: string | null) {
+      if (!url) return;
+      // Ignore our own custom scheme and the Expo dev-client/Expo Go launch URL.
+      if (url.startsWith('appleiamanga://') || url.startsWith('exp://') || url.startsWith('exp+')) return;
+      try {
+        await importCbzFromUri(url, guessFileName(url));
+        router.replace('/(tabs)');
+      } catch {
+        Alert.alert('Erro ao abrir arquivo', 'Não foi possível importar este arquivo CBZ.');
+      }
+    }
+
+    void Linking.getInitialURL().then(handleIncomingUrl);
+    const subscription = Linking.addEventListener('url', ({ url }) => void handleIncomingUrl(url));
+    return () => subscription.remove();
+  }, [router]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

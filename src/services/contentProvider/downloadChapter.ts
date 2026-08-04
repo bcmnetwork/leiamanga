@@ -6,7 +6,9 @@
  */
 import { Directory, File, Paths } from 'expo-file-system';
 
-import { createChapter, createSeriesIfNeeded, getChapterBySourceUri, getSeriesById, setSeriesCoverIfMissing } from '@/src/db/repository';
+import { createChapter, createSeriesIfNeeded, getChapterBySourceUri, getSeriesById, setChapterDownloaded, setSeriesCoverIfMissing, updateSeriesMetadata } from '@/src/db/repository';
+import type { ChapterRow } from '@/src/db/types';
+import { genreLabelFromSlug } from '@/src/utils/genre';
 import { generateId } from '@/src/utils/id';
 import { getChapterPages, type ProviderChapterSummary, type ProviderWorkDetail } from './ContentCatalogService';
 import type { ContentProviderSession } from './ContentProviderService';
@@ -24,6 +26,70 @@ export function buildProviderSourcePrefix(session: ContentProviderSession, workS
 
 export function chapterIdFromSourceUri(sourceUri: string, prefix: string): string {
   return sourceUri.slice(prefix.length);
+}
+
+/** Parses a `provider:{domain}:{workSlug}:{chapterId}` source_uri back into its parts, for the currently connected session's domain. */
+export function parseProviderSourceUri(
+  sourceUri: string,
+  domain: string,
+): { workSlug: string; chapterId: string } | null {
+  const prefix = `provider:${domain}:`;
+  if (!sourceUri.startsWith(prefix)) return null;
+  const rest = sourceUri.slice(prefix.length);
+  const separatorIndex = rest.indexOf(':');
+  if (separatorIndex === -1) return null;
+  return { workSlug: rest.slice(0, separatorIndex), chapterId: rest.slice(separatorIndex + 1) };
+}
+
+/** Fills in description/genre/author from the provider's work detail, but only for fields the series doesn't already have (never overwrites a user's own edits). */
+export async function ensureSeriesMetadataFromWork(seriesId: string, work: ProviderWorkDetail): Promise<void> {
+  const series = await getSeriesById(seriesId);
+  if (!series) return;
+  const updates: { description?: string; genre?: string; author?: string } = {};
+  if (!series.description && work.description) updates.description = work.description;
+  // ProviderWorkDetail.genres isn't populated by the API for individual works — tags is
+  // what the provider's own work screen actually shows as genre-like badges.
+  if (!series.genre && work.tags?.length) updates.genre = work.tags.map(genreLabelFromSlug).join(', ');
+  if (!series.author && work.author) updates.author = work.author;
+  if (Object.keys(updates).length > 0) await updateSeriesMetadata(seriesId, updates);
+}
+
+/** Re-downloads a chapter's pages into its existing `pages_dir` after its files were removed from the device, restoring it without losing the chapter's row/history. */
+export async function redownloadChapterFiles(
+  session: ContentProviderSession,
+  chapter: ChapterRow,
+  onProgress?: (done: number, total: number) => void,
+): Promise<void> {
+  const parsed = parseProviderSourceUri(chapter.source_uri, session.domain);
+  if (!parsed) {
+    throw new Error('Este capítulo não está vinculado ao provedor conectado.');
+  }
+
+  const { pages } = await getChapterPages(session, parsed.workSlug, parsed.chapterId);
+  if (pages.length === 0) {
+    throw new Error('Este capítulo não tem páginas para baixar.');
+  }
+
+  const destDir = new Directory(chapter.pages_dir);
+  destDir.create({ intermediates: true, idempotent: true });
+
+  const sortedPages = pages.slice().sort((a, b) => a.index - b.index);
+  onProgress?.(0, sortedPages.length);
+  let done = 0;
+  try {
+    for (const page of sortedPages) {
+      const ext = guessExtension(page.imageUrl);
+      const pageFileName = `page-${String(page.index + 1).padStart(4, '0')}.${ext}`;
+      const target = new File(destDir, pageFileName);
+      await File.downloadFileAsync(page.imageUrl, target, { idempotent: true });
+      done += 1;
+      onProgress?.(done, sortedPages.length);
+    }
+  } catch {
+    throw new Error('Falha ao baixar as páginas do capítulo. Verifique sua conexão e tente novamente.');
+  }
+
+  await setChapterDownloaded(chapter.id, true);
 }
 
 function guessExtension(imageUrl: string): string {
@@ -61,6 +127,7 @@ export async function downloadChapterForOffline(
   destDir.create({ intermediates: true, idempotent: true });
 
   const seriesId = await createSeriesIfNeeded(work.title);
+  await ensureSeriesMetadataFromWork(seriesId, work);
 
   // Download the work's real cover once per series (not a page image) — best-effort,
   // a failed cover download must not block the chapter download itself.

@@ -19,7 +19,7 @@ import { EmptyState } from '@/src/components/common/EmptyState';
 import { ScreenContainer } from '@/src/components/common/ScreenContainer';
 import { SeriesGridItem } from '@/src/components/library/SeriesGridItem';
 import { deleteDownloadedSeries } from '@/src/db/libraryMaintenance';
-import { toggleFavorite } from '@/src/db/repository';
+import { createBlankSeries, toggleFavorite } from '@/src/db/repository';
 import { useContentProviderStore } from '@/src/state/contentProviderStore';
 import { useLibraryStore } from '@/src/state/libraryStore';
 import { useAppTheme } from '@/src/theme';
@@ -74,6 +74,19 @@ export default function LibraryScreen() {
     }
   }
 
+  async function handleCreateWork() {
+    const newId = await createBlankSeries();
+    router.push({ pathname: '/series/edit/[id]', params: { id: newId } });
+  }
+
+  function handleAddPress() {
+    Alert.alert('Adicionar', 'O que você deseja fazer?', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Criar obra', onPress: () => void handleCreateWork() },
+      { text: 'Importar CBZ', onPress: () => void handleImport() },
+    ]);
+  }
+
   async function handleToggleFavorite(seriesId: string) {
     await toggleFavorite(seriesId);
     await refresh();
@@ -114,7 +127,7 @@ export default function LibraryScreen() {
           ) : null}
           <Pressable
             style={[styles.importButton, { backgroundColor: colors.accent }]}
-            onPress={handleImport}
+            onPress={handleAddPress}
             disabled={importing}>
             {importing ? (
               <ActivityIndicator color="#fff" size="small" />

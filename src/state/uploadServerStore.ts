@@ -7,11 +7,11 @@ import * as Network from 'expo-network';
 import { create } from 'zustand';
 
 import {
-  generateUploadPassword,
-  startUploadServer,
-  UPLOAD_SERVER_PORT,
-  type UploadResult,
-  type UploadServerHandle,
+    generateUploadPassword,
+    startUploadServer,
+    UPLOAD_SERVER_PORT,
+    type UploadResult,
+    type UploadServerHandle,
 } from '@/src/services/uploadServer/uploadServerService';
 
 interface UploadServerState {

@@ -7,7 +7,13 @@ import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TextIn
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { ScreenContainer } from '@/src/components/common/ScreenContainer';
 import { deleteDownloadedChapter } from '@/src/db/libraryMaintenance';
-import { getChapterBySourceUri, listSourceUrisWithPrefix } from '@/src/db/repository';
+import {
+    getChapterBySourceUri,
+    listReadMarksWithPrefix,
+    listSourceUrisWithPrefix,
+    markSourceRead,
+    unmarkSourceRead,
+} from '@/src/db/repository';
 import {
     addToLibrary,
     getChapters,
@@ -52,6 +58,7 @@ export default function ProviderWorkScreen() {
   const [chapterQuery, setChapterQuery] = useState('');
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [readNumbers, setReadNumbers] = useState<Set<number>>(new Set());
+  const [manualReadIds, setManualReadIds] = useState<Set<string>>(new Set());
   const [history, setHistory] = useState<{ chapterNumber: string; progressPercent: number }[]>([]);
 
   // Serializes save/unsave calls in the order the user issued them, so a fast
@@ -83,6 +90,9 @@ export default function ProviderWorkScreen() {
       const prefix = buildProviderSourcePrefix(session, workDetail.slug);
       const sourceUris = await listSourceUrisWithPrefix(prefix).catch(() => []);
       setDownloadedIds(new Set(sourceUris.map((uri) => chapterIdFromSourceUri(uri, prefix))));
+
+      const readMarkKeys = await listReadMarksWithPrefix(prefix).catch(() => []);
+      setManualReadIds(new Set(readMarkKeys.map((key) => chapterIdFromSourceUri(key, prefix))));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível carregar esta obra.');
     } finally {
@@ -136,6 +146,23 @@ export default function ProviderWorkScreen() {
     const key = downloadKey(work.slug, chapter.id);
     if (queueErrors[key]) removeItem(key);
     enqueue(session, work, chapter);
+  }
+
+  async function handleToggleRead(chapter: ProviderChapterSummary) {
+    if (!session || !work) return;
+    // Chapters the server already confirms as read (via reading history) can't be un-marked locally.
+    if (readNumbers.has(chapter.number)) return;
+    const prefix = buildProviderSourcePrefix(session, work.slug);
+    const markKey = `${prefix}${chapter.id}`;
+    const nextRead = !manualReadIds.has(chapter.id);
+    setManualReadIds((prev) => {
+      const next = new Set(prev);
+      if (nextRead) next.add(chapter.id);
+      else next.delete(chapter.id);
+      return next;
+    });
+    if (nextRead) await markSourceRead(markKey);
+    else await unmarkSourceRead(markKey);
   }
 
   function handleDownloadRead() {
@@ -385,6 +412,7 @@ export default function ProviderWorkScreen() {
           const key = downloadKey(work.slug, item.id);
           const status = statuses[key];
           const queueError = queueErrors[key];
+          const isRead = readNumbers.has(item.number) || manualReadIds.has(item.id);
           return (
             <Pressable
               style={[styles.chapterRow, { borderColor: colors.border }]}
@@ -399,14 +427,23 @@ export default function ProviderWorkScreen() {
                 <Text style={[styles.chapterTitle, { color: colors.text }]} numberOfLines={1}>
                   Capítulo {item.number}{item.title ? ` — ${item.title}` : ''}
                 </Text>
-                {item.publishedAt || readNumbers.has(item.number) ? (
+                {item.publishedAt || isRead ? (
                   <Text style={[styles.chapterMeta, { color: colors.textMuted }]}>
                     {item.publishedAt ? new Date(item.publishedAt).toLocaleDateString('pt-BR') : ''}
-                    {item.publishedAt && readNumbers.has(item.number) ? ' · ' : ''}
-                    {readNumbers.has(item.number) ? 'Lido' : ''}
+                    {item.publishedAt && isRead ? ' · ' : ''}
+                    {isRead ? 'Lido' : ''}
                   </Text>
                 ) : null}
               </View>
+              {item.isLocked ? null : (
+                <Pressable hitSlop={8} onPress={() => void handleToggleRead(item)}>
+                  <Ionicons
+                    name={isRead ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                    size={20}
+                    color={isRead ? colors.accent : colors.textMuted}
+                  />
+                </Pressable>
+              )}
               {item.isLocked ? (
                 <Ionicons name="lock-closed" size={16} color={colors.textMuted} />
               ) : queueError ? (

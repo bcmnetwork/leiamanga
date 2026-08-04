@@ -5,6 +5,7 @@ export interface SeriesRow {
   cover_path: string | null;
   description: string | null;
   genre: string | null;
+  author: string | null;
   favorite: number;
   created_at: number;
 }
@@ -18,13 +19,16 @@ export interface ChapterRow {
   page_count: number;
   sort_order: number;
   added_at: number;
+  downloaded: number;
 }
 
 export interface ChapterWithProgress extends ChapterRow {
   last_page: number;
+  completed: number;
 }
 
 export interface SeriesWithProgress extends SeriesRow {
   chapterCount: number;
+  downloadedChapterCount: number;
   lastReadAt: number | null;
 }

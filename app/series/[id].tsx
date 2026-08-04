@@ -2,22 +2,31 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { pickAndImportCbzFiles } from '@/src/cbz/importCbz';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { ScreenContainer } from '@/src/components/common/ScreenContainer';
 import { deleteDownloadedChapter } from '@/src/db/libraryMaintenance';
-import { getSeriesById, listChaptersForSeries, toggleFavorite } from '@/src/db/repository';
+import { getSeriesById, listChaptersForSeries, setChapterCompleted, toggleFavorite } from '@/src/db/repository';
 import type { ChapterWithProgress, SeriesRow } from '@/src/db/types';
+import { redownloadChapterFiles } from '@/src/services/contentProvider/downloadChapter';
+import { useContentProviderStore } from '@/src/state/contentProviderStore';
 import { useAppTheme } from '@/src/theme';
+
+const DESCRIPTION_COLLAPSE_THRESHOLD = 180;
 
 export default function SeriesDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { colors } = useAppTheme();
+  const { session } = useContentProviderStore();
   const [series, setSeries] = useState<SeriesRow | null>(null);
   const [chapters, setChapters] = useState<ChapterWithProgress[]>([]);
   const [loading, setLoading] = useState(true);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const [redownloadingId, setRedownloadingId] = useState<string | null>(null);
+  const [importingChapter, setImportingChapter] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -66,10 +75,10 @@ export default function SeriesDetailScreen() {
   }
 
   function handleDeleteChapter(chapter: ChapterWithProgress) {
-    Alert.alert('Apagar capítulo?', `"${chapter.title}" será removido do dispositivo.`, [
+    Alert.alert('Remover do dispositivo?', `"${chapter.title}" será removido do dispositivo. Seu histórico de leitura será mantido${chapter.source_uri.startsWith('provider:') ? ' e o capítulo poderá ser baixado novamente' : ''}.`, [
       { text: 'Cancelar', style: 'cancel' },
       {
-        text: 'Apagar',
+        text: 'Remover',
         style: 'destructive',
         onPress: () => {
           void (async () => {
@@ -79,6 +88,55 @@ export default function SeriesDetailScreen() {
         },
       },
     ]);
+  }
+
+  async function handleOpenChapter(chapter: ChapterWithProgress) {
+    if (chapter.downloaded) {
+      router.push(`/reader/${chapter.id}`);
+      return;
+    }
+    const prefix = session ? `provider:${session.domain}:` : null;
+    if (!session || !prefix || !chapter.source_uri.startsWith(prefix)) {
+      Alert.alert(
+        'Capítulo não disponível',
+        'Este capítulo foi removido do dispositivo e não há um provedor conectado para baixá-lo novamente.'
+      );
+      return;
+    }
+    setRedownloadingId(chapter.id);
+    try {
+      await redownloadChapterFiles(session, chapter);
+      await load();
+      router.push(`/reader/${chapter.id}`);
+    } catch (err) {
+      Alert.alert('Erro', err instanceof Error ? err.message : 'Não foi possível baixar o capítulo novamente.');
+    } finally {
+      setRedownloadingId(null);
+    }
+  }
+
+  async function handleToggleReadChapter(chapter: ChapterWithProgress) {
+    await setChapterCompleted(chapter.id, chapter.completed === 0);
+    await load();
+  }
+
+  async function handleAddChapter() {
+    if (!id) return;
+    setImportingChapter(true);
+    try {
+      const result = await pickAndImportCbzFiles(id);
+      if (result.imported > 0) await load();
+      if (result.imported > 0 || result.failed > 0) {
+        Alert.alert(
+          'Importação concluída',
+          `${result.imported} capítulo(s) importado(s)${result.failed ? `, ${result.failed} falharam` : ''}.`
+        );
+      }
+    } catch {
+      Alert.alert('Erro ao importar', 'Não foi possível abrir o seletor de arquivos. Tente novamente.');
+    } finally {
+      setImportingChapter(false);
+    }
   }
 
   if (!loading && !series) {
@@ -110,9 +168,18 @@ export default function SeriesDetailScreen() {
             </Pressable>
           </View>
           {series?.genre ? (
-            <View style={[styles.genreBadge, { borderColor: colors.border }]}>
-              <Text style={[styles.genreBadgeText, { color: colors.textMuted }]}>{series.genre}</Text>
+            <View style={styles.genreRow}>
+              {series.genre.split(',').map((g) => g.trim()).filter(Boolean).map((g) => (
+                <View key={g} style={[styles.genreBadge, { borderColor: colors.border }]}>
+                  <Text style={[styles.genreBadgeText, { color: colors.textMuted }]}>{g}</Text>
+                </View>
+              ))}
             </View>
+          ) : null}
+          {series?.author ? (
+            <Text style={[styles.authorText, { color: colors.textMuted }]} numberOfLines={1}>
+              Autor: {series.author}
+            </Text>
           ) : null}
           <Pressable style={styles.favoriteRow} onPress={handleToggleFavorite}>
             <Ionicons
@@ -128,15 +195,26 @@ export default function SeriesDetailScreen() {
       </View>
 
       {series?.description ? (
-        <Text style={[styles.description, { color: colors.textMuted }]} numberOfLines={6}>
-          {series.description}
-        </Text>
+        <View style={styles.descriptionWrap}>
+          <Text
+            style={[styles.description, { color: colors.textMuted }]}
+            numberOfLines={descriptionExpanded ? undefined : 4}>
+            {series.description}
+          </Text>
+          {series.description.length > DESCRIPTION_COLLAPSE_THRESHOLD ? (
+            <Pressable onPress={() => setDescriptionExpanded((v) => !v)}>
+              <Text style={[styles.readMore, { color: colors.accent }]}>
+                {descriptionExpanded ? 'Ler menos' : 'Ler mais'}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
 
       {continueTarget ? (
         <Pressable
           style={[styles.continueButton, { backgroundColor: colors.accent }]}
-          onPress={() => router.push(`/reader/${continueTarget.id}`)}>
+          onPress={() => void handleOpenChapter(continueTarget)}>
           <Ionicons name="play" size={16} color={colors.background} />
           <Text style={[styles.continueButtonText, { color: colors.background }]}>
             Continuar: {continueTarget.title}
@@ -144,9 +222,22 @@ export default function SeriesDetailScreen() {
         </Pressable>
       ) : null}
 
-      <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>
-        {chapters.length} {chapters.length === 1 ? 'capítulo' : 'capítulos'}
-      </Text>
+      <View style={styles.sectionRow}>
+        <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>
+          {chapters.length} {chapters.length === 1 ? 'capítulo' : 'capítulos'}
+        </Text>
+        <Pressable
+          style={[styles.addChapterButton, { borderColor: colors.border }]}
+          disabled={importingChapter}
+          onPress={() => void handleAddChapter()}>
+          {importingChapter ? (
+            <ActivityIndicator size="small" color={colors.accent} />
+          ) : (
+            <Ionicons name="add-circle-outline" size={16} color={colors.accent} />
+          )}
+          <Text style={[styles.addChapterButtonText, { color: colors.accent }]}>Enviar CBZ</Text>
+        </Pressable>
+      </View>
 
       <FlatList
         data={chapters}
@@ -154,6 +245,40 @@ export default function SeriesDetailScreen() {
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => {
           const progress = item.page_count > 0 ? item.last_page / item.page_count : 0;
+          const isRead = item.completed === 1 || progress >= 0.9;
+          const isProviderLinked = session ? item.source_uri.startsWith(`provider:${session.domain}:`) : false;
+
+          if (!item.downloaded) {
+            return (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.chapterRow,
+                  { borderColor: colors.border },
+                  pressed && styles.chapterRowPressed,
+                ]}
+                onPress={() => void handleOpenChapter(item)}
+                onLongPress={() => handleDeleteChapter(item)}>
+                <View style={styles.chapterInfo}>
+                  <Text style={[styles.chapterTitle, { color: colors.text }]} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  <Text style={[styles.chapterMeta, { color: colors.textMuted }]}>
+                    {isProviderLinked ? 'Removido do dispositivo · toque para baixar novamente' : 'Não disponível para leitura'}
+                  </Text>
+                </View>
+                {redownloadingId === item.id ? (
+                  <ActivityIndicator size="small" color={colors.accent} />
+                ) : (
+                  <Ionicons
+                    name={isProviderLinked ? 'cloud-download-outline' : 'cloud-offline-outline'}
+                    size={20}
+                    color={colors.textMuted}
+                  />
+                )}
+              </Pressable>
+            );
+          }
+
           return (
             <Pressable
               style={({ pressed }) => [
@@ -161,7 +286,7 @@ export default function SeriesDetailScreen() {
                 { borderColor: colors.border },
                 pressed && styles.chapterRowPressed,
               ]}
-              onPress={() => router.push(`/reader/${item.id}`)}
+              onPress={() => void handleOpenChapter(item)}
               onLongPress={() => handleDeleteChapter(item)}>
               <View style={styles.chapterInfo}>
                 <Text style={[styles.chapterTitle, { color: colors.text }]} numberOfLines={1}>
@@ -170,6 +295,7 @@ export default function SeriesDetailScreen() {
                 <Text style={[styles.chapterMeta, { color: colors.textMuted }]}>
                   {item.page_count} páginas
                   {item.last_page > 0 ? ` · pág. ${item.last_page}` : ''}
+                  {isRead ? ' · Lido' : ''}
                 </Text>
               </View>
               {progress > 0 ? (
@@ -182,6 +308,13 @@ export default function SeriesDetailScreen() {
                   />
                 </View>
               ) : null}
+              <Pressable hitSlop={8} onPress={() => void handleToggleReadChapter(item)}>
+                <Ionicons
+                  name={isRead ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                  size={20}
+                  color={isRead ? colors.accent : colors.textMuted}
+                />
+              </Pressable>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
             </Pressable>
           );
@@ -225,6 +358,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
+  genreRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
   genreBadge: {
     alignSelf: 'flex-start',
     paddingHorizontal: 8,
@@ -236,6 +374,9 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
+  authorText: {
+    fontSize: 12,
+  },
   favoriteRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -244,11 +385,18 @@ const styles = StyleSheet.create({
   favoriteText: {
     fontSize: 13,
   },
+  descriptionWrap: {
+    marginHorizontal: 16,
+    marginTop: 12,
+  },
   description: {
     fontSize: 13,
     lineHeight: 19,
-    marginHorizontal: 16,
-    marginTop: 12,
+  },
+  readMore: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
   },
   continueButton: {
     flexDirection: 'row',
@@ -264,14 +412,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 16,
+    marginTop: 20,
+    marginBottom: 8,
+  },
   sectionTitle: {
     fontSize: 12,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginHorizontal: 16,
-    marginTop: 20,
-    marginBottom: 8,
+  },
+  addChapterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  addChapterButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   listContent: {
     paddingHorizontal: 16,

@@ -1,7 +1,7 @@
 import { getDb } from './client';
 
 // Bump when adding migrations; migrateDatabase() only runs statements for versions above the stored one.
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export async function migrateDatabase(): Promise<void> {
   const db = await getDb();
@@ -47,6 +47,18 @@ export async function migrateDatabase(): Promise<void> {
     await db.execAsync(`
       ALTER TABLE series ADD COLUMN description TEXT;
       ALTER TABLE series ADD COLUMN genre TEXT;
+    `);
+  }
+
+  if (currentVersion < 3) {
+    await db.execAsync(`
+      ALTER TABLE series ADD COLUMN author TEXT;
+      ALTER TABLE chapters ADD COLUMN downloaded INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE reading_progress ADD COLUMN completed INTEGER NOT NULL DEFAULT 0;
+      CREATE TABLE IF NOT EXISTS read_marks (
+        source_key TEXT PRIMARY KEY,
+        marked_at INTEGER NOT NULL
+      );
     `);
   }
 

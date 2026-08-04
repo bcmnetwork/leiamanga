@@ -23,6 +23,7 @@ import type { SeriesRow } from '@/src/db/types';
 import { getWork } from '@/src/services/contentProvider/ContentCatalogService';
 import { useContentProviderStore } from '@/src/state/contentProviderStore';
 import { useAppTheme } from '@/src/theme';
+import { genreLabelFromSlug } from '@/src/utils/genre';
 
 async function pickAndCopyCover(seriesId: string): Promise<string | null> {
   const result = await DocumentPicker.getDocumentAsync({
@@ -53,10 +54,6 @@ async function downloadCover(seriesId: string, coverUrl: string): Promise<string
   return destFile.uri;
 }
 
-function genreLabelFromSlug(slug: string): string {
-  return slug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-}
-
 export default function SeriesEditScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -68,6 +65,7 @@ export default function SeriesEditScreen() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [genre, setGenre] = useState('');
+  const [author, setAuthor] = useState('');
   const [coverPath, setCoverPath] = useState<string | null>(null);
   const [pickingCover, setPickingCover] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -83,6 +81,7 @@ export default function SeriesEditScreen() {
       setTitle(row.title);
       setDescription(row.description ?? '');
       setGenre(row.genre ?? '');
+      setAuthor(row.author ?? '');
       setCoverPath(row.cover_path);
     }
     // Only offer syncing when this series has a chapter downloaded from the
@@ -108,7 +107,8 @@ export default function SeriesEditScreen() {
       const work = await getWork(session, providerWorkSlug);
       setTitle(work.title);
       setDescription(work.description ?? '');
-      if (work.genres?.length) setGenre(work.genres.map(genreLabelFromSlug).join(', '));
+      if (work.tags?.length) setGenre(work.tags.map(genreLabelFromSlug).join(', '));
+      if (work.author) setAuthor(work.author);
       if (work.coverUrl) {
         const newCoverPath = await downloadCover(series.id, work.coverUrl);
         setCoverPath(newCoverPath);
@@ -147,9 +147,12 @@ export default function SeriesEditScreen() {
         title: trimmedTitle,
         description: description.trim() || null,
         genre: genre.trim() || null,
+        author: author.trim() || null,
         coverPath: coverPath ?? null,
       });
-      router.back();
+      // Replace (not back()) so this also works when arriving fresh from "Criar obra",
+      // which has no series-detail screen underneath it on the navigation stack yet.
+      router.replace(`/series/${series.id}`);
     } catch {
       Alert.alert('Erro', 'Não foi possível salvar as alterações.');
     } finally {
@@ -218,6 +221,15 @@ export default function SeriesEditScreen() {
             value={genre}
             onChangeText={setGenre}
             placeholder="Ex: Ação, Romance, Fantasia"
+            placeholderTextColor={colors.textMuted}
+          />
+
+          <Text style={[styles.label, { color: colors.textMuted }]}>Autor</Text>
+          <TextInput
+            style={[styles.input, { borderColor: colors.border, color: colors.text }]}
+            value={author}
+            onChangeText={setAuthor}
+            placeholder="Nome do autor"
             placeholderTextColor={colors.textMuted}
           />
 

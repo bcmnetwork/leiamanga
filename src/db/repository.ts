@@ -23,6 +23,19 @@ export async function createSeriesIfNeeded(title: string, folderPath?: string): 
   return id;
 }
 
+/** Always inserts a brand-new series row, even if a series with the same title already exists — used by the "Criar obra" flow (unlike `createSeriesIfNeeded`, which dedupes CBZ/provider imports by title). */
+export async function createBlankSeries(title: string = 'Nova obra'): Promise<string> {
+  const db = await getDb();
+  const id = generateId();
+  await db.runAsync(
+    'INSERT INTO series (id, title, folder_path, cover_path, favorite, created_at) VALUES (?, ?, NULL, NULL, 0, ?)',
+    id,
+    title,
+    Date.now()
+  );
+  return id;
+}
+
 export interface CreateChapterInput {
   id: string;
   seriesId: string;
@@ -100,6 +113,7 @@ export async function listSeries(options: ListSeriesOptions = {}): Promise<Serie
     `
     SELECT s.*,
       (SELECT COUNT(*) FROM chapters c WHERE c.series_id = s.id) as chapterCount,
+      (SELECT COUNT(*) FROM chapters c WHERE c.series_id = s.id AND c.downloaded = 1) as downloadedChapterCount,
       (SELECT MAX(rp.updated_at) FROM reading_progress rp
         JOIN chapters c2 ON c2.id = rp.chapter_id
         WHERE c2.series_id = s.id AND rp.last_page > 0) as lastReadAt
@@ -137,6 +151,7 @@ export interface SeriesMetadataInput {
   title?: string;
   description?: string | null;
   genre?: string | null;
+  author?: string | null;
   coverPath?: string | null;
 }
 
@@ -157,6 +172,10 @@ export async function updateSeriesMetadata(seriesId: string, input: SeriesMetada
     sets.push('genre = ?');
     params.push(input.genre);
   }
+  if (input.author !== undefined) {
+    sets.push('author = ?');
+    params.push(input.author);
+  }
   if (input.coverPath !== undefined) {
     sets.push('cover_path = ?');
     params.push(input.coverPath);
@@ -170,7 +189,7 @@ export async function listChaptersForSeries(seriesId: string): Promise<ChapterWi
   const db = await getDb();
   return db.getAllAsync<ChapterWithProgress>(
     `
-    SELECT c.*, COALESCE(rp.last_page, 0) as last_page
+    SELECT c.*, COALESCE(rp.last_page, 0) as last_page, COALESCE(rp.completed, 0) as completed
     FROM chapters c
     LEFT JOIN reading_progress rp ON rp.chapter_id = c.id
     WHERE c.series_id = ?
@@ -178,6 +197,12 @@ export async function listChaptersForSeries(seriesId: string): Promise<ChapterWi
     `,
     seriesId
   );
+}
+
+/** Marks a chapter's files as removed from (or restored to) the device, without touching the chapter's row, reading progress, or its series — used so reading history/metadata survives "remove from device". */
+export async function setChapterDownloaded(chapterId: string, downloaded: boolean): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE chapters SET downloaded = ? WHERE id = ?', downloaded ? 1 : 0, chapterId);
 }
 
 export async function getChapterById(chapterId: string): Promise<ChapterRow | null> {
@@ -261,6 +286,43 @@ export async function getProgress(chapterId: string): Promise<number> {
     chapterId
   );
   return row?.last_page ?? 0;
+}
+
+/** Manually marks a local chapter as read/unread — independent of (but consistent with) the page-based progress bar. */
+export async function setChapterCompleted(chapterId: string, completed: boolean): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT INTO reading_progress (chapter_id, last_page, updated_at, completed) VALUES (?, 0, ?, ?)
+     ON CONFLICT(chapter_id) DO UPDATE SET completed = excluded.completed, updated_at = excluded.updated_at`,
+    chapterId,
+    Date.now(),
+    completed ? 1 : 0
+  );
+}
+
+/** Local-only "read" marker for provider chapters that aren't (or aren't yet) downloaded, keyed by e.g. `provider:{domain}:{workSlug}:{chapterNumber}`. */
+export async function markSourceRead(sourceKey: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT INTO read_marks (source_key, marked_at) VALUES (?, ?)
+     ON CONFLICT(source_key) DO UPDATE SET marked_at = excluded.marked_at`,
+    sourceKey,
+    Date.now()
+  );
+}
+
+export async function unmarkSourceRead(sourceKey: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM read_marks WHERE source_key = ?', sourceKey);
+}
+
+export async function listReadMarksWithPrefix(prefix: string): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ source_key: string }>(
+    'SELECT source_key FROM read_marks WHERE source_key LIKE ?',
+    `${prefix}%`
+  );
+  return rows.map((row) => row.source_key);
 }
 
 export async function getSetting(key: string): Promise<string | null> {

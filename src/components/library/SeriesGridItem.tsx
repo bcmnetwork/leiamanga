@@ -38,6 +38,12 @@ export function SeriesGridItem({ series, onPress, onLongPress, onToggleFavorite 
             color={series.favorite ? '#FFD166' : '#FFFFFF'}
           />
         </Pressable>
+        {series.chapterCount > 0 && series.downloadedChapterCount === 0 ? (
+          <View style={[styles.unavailableBadge, { backgroundColor: colors.overlay }]}>
+            <Ionicons name="cloud-offline-outline" size={12} color="#FFFFFF" />
+            <Text style={styles.unavailableBadgeText}>Indisponível</Text>
+          </View>
+        ) : null}
       </View>
       <Text numberOfLines={2} style={[styles.title, { color: colors.text }]}>
         {series.title}
@@ -78,6 +84,23 @@ const styles = StyleSheet.create({
     right: 6,
     borderRadius: 12,
     padding: 4,
+  },
+  unavailableBadge: {
+    position: 'absolute',
+    bottom: 6,
+    left: 6,
+    right: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderRadius: 8,
+    paddingVertical: 3,
+  },
+  unavailableBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   title: {
     marginTop: 8,

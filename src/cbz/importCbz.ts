@@ -14,18 +14,19 @@ export interface ImportSummary {
   failed: number;
 }
 
-/** Extracts and registers a single CBZ file already sitting at `uri` (e.g. from the document picker or a received upload). */
-export async function importCbzFromUri(uri: string, fileName: string): Promise<void> {
+/** Extracts and registers a single CBZ file already sitting at `uri` (e.g. from the document picker or a received upload).
+ * When `seriesId` is provided, the chapter is attached to that existing series instead of guessing/creating one from the file name. */
+export async function importCbzFromUri(uri: string, fileName: string, seriesId?: string): Promise<void> {
   const chapterId = generateId();
-  const seriesTitle = guessSeriesTitle(fileName);
-  const seriesId = await createSeriesIfNeeded(seriesTitle);
+  const chapterTitle = guessSeriesTitle(fileName);
+  const resolvedSeriesId = seriesId ?? (await createSeriesIfNeeded(chapterTitle));
   const destDir = new Directory(Paths.document, 'chapters', chapterId);
   const extracted = await extractCbzToDirectory(uri, destDir);
 
   await createChapter({
     id: chapterId,
-    seriesId,
-    title: seriesTitle,
+    seriesId: resolvedSeriesId,
+    title: chapterTitle,
     sourceUri: uri,
     pagesDir: extracted.pagesDir,
     pageFiles: extracted.pageFiles,
@@ -33,7 +34,7 @@ export async function importCbzFromUri(uri: string, fileName: string): Promise<v
   });
 }
 
-export async function pickAndImportCbzFiles(): Promise<ImportSummary> {
+export async function pickAndImportCbzFiles(seriesId?: string): Promise<ImportSummary> {
   const result = await DocumentPicker.getDocumentAsync({
     multiple: true,
     type: ['application/vnd.comicbook+zip', 'application/zip', 'application/x-cbz', '*/*'],
@@ -49,7 +50,7 @@ export async function pickAndImportCbzFiles(): Promise<ImportSummary> {
 
   for (const asset of result.assets) {
     try {
-      await importCbzFromUri(asset.uri, asset.name);
+      await importCbzFromUri(asset.uri, asset.name, seriesId);
       imported += 1;
     } catch (error) {
       console.warn('Falha ao importar CBZ', asset.name, error);
